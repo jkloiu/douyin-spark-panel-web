@@ -576,10 +576,17 @@ const App={
     const nm=document.getElementById('accNm');if(nm)nm.textContent='';
     const av=document.getElementById('accAv');if(av)av.textContent='';
     const np=document.getElementById('navPanelUsers');if(np)np.style.display='none';
-    try{localStorage.removeItem('current_account');}catch(e){}
+    /* [v16] 这里**不能**再删 localStorage.current_account：
+       resetAccountUI() 在 boot() / _afterAuth() 里都跑在「读取 current_account 之前」，
+       一旦在这里删掉，后面 getItem 永远拿到 null → 必然回落到 accounts[0]，
+       表现就是「切了抖音号，一下拉刷新（=reload）就被切回第一个账号」。
+       真正要清的场景（登出 / 会话失效 / 换身份）已经挪到 showLogin() 里。 */
   },
   showLogin(msg){
     this.resetAccountUI();
+    /* [v16] 「当前抖音号」偏好在**会话结束**时才清（登出 / token 失效 / 换身份都走这里）。
+       原来这句在 resetAccountUI() 里，于是每次冷启动/下拉刷新都会先被清掉 → 刷新后回落到第一个账号。 */
+    try{localStorage.removeItem('current_account');}catch(e){}
     document.getElementById('app').classList.remove('on');
     document.getElementById('login').style.display='flex';
     document.getElementById('loginErr').textContent=msg||'';
@@ -3778,8 +3785,10 @@ Loaders.tasks=async function(_poll){
     html+='</section>';
 
     /* ---------- 5) crontab（仅管理员） ---------- */
+    /* [v16] 按用户要求：这块「当前 crontab」**移动端隐藏**（≤767px），桌面照旧显示。
+       注意别和「系统状态」页那块「系统 crontab」搞混 —— 用户只要求删任务页这个。 */
     if(schedIsAdmin){
-      html+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] p-4 shadow-sm">'+
+      html+='<section class="hide-m bg-surface-container-low border border-surface-container-high rounded-[14px] p-4 shadow-sm">'+
         '<div class="flex items-center gap-2 mb-3">'+MI('terminal','text-[19px] text-primary-container')+
         '<h2 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">当前 crontab</h2>'+
         '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-label-uppercase font-label-uppercase border border-surface-container-highest">仅管理员可见</span></div>'+

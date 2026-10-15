@@ -1700,17 +1700,24 @@ html.msopen,html.msopen body{overflow:hidden!important}
   .flog-wrap table{display:block!important;width:100%!important;min-width:0!important}
   .flog-wrap thead{display:none!important}
   .flog-wrap tbody{display:grid;grid-template-columns:1fr;gap:10px;width:100%}
-  .flog-wrap tr{display:grid!important;grid-template-columns:minmax(0,1fr) auto;
-    grid-template-areas:"tm tm" "obj res" "dsc dsc";gap:4px 10px;
+  /* [v16] 用户要求：好友 + 日志同一行，日期 + 状态同一行
+     （原布局是 时间 / 对象+结果 / 说明 三行）。 */
+  .flog-wrap tr{display:grid!important;grid-template-columns:minmax(0,auto) minmax(0,1fr);
+    grid-template-areas:"obj dsc" "tm res";gap:3px 8px;
     padding:11px 13px;margin:0!important;box-sizing:border-box;
     border:1px solid var(--line)!important;border-radius:12px;background:var(--panel)}
   .flog-wrap td{display:block!important;width:auto!important;min-width:0;padding:0!important;border:none!important}
-  .flog-wrap td.lg-t{grid-area:tm;font-size:11px;color:var(--txt3);letter-spacing:.02em}
-  .flog-wrap td.lg-o{grid-area:obj;font-size:12.5px;font-weight:600;color:#dee2f1;
-    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .flog-wrap td.lg-r{grid-area:res;justify-self:end;align-self:center}
+  .flog-wrap td.lg-o{grid-area:obj;align-self:center;font-size:12.5px;font-weight:600;color:#dee2f1;
+    max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .flog-wrap td.lg-d{grid-area:dsc;font-size:12px;line-height:1.55;color:var(--txt2);
-    margin-top:3px;word-break:break-word}
+    word-break:break-word}
+  .flog-wrap td.lg-t{grid-area:tm;font-size:11px;color:var(--txt3);letter-spacing:.02em}
+  .flog-wrap td.lg-r{grid-area:res;justify-self:end;align-self:center}
+}
+
+/* ── [v16] 移动端隐藏工具类（任务页「当前 crontab」用它只保留桌面端） ── */
+@media (max-width:767px){
+  .hide-m{display:none!important}
 }
 
 /* ══════════════════════════════════════════════════════════════════════
