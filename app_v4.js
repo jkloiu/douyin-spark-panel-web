@@ -667,7 +667,13 @@ const App={
        ② GET  /api/wx/qr/img/<t>    → 服务端出二维码 PNG（内容就是那 6 位）
        ③ 用户在小程序「我的 → 网页登录确认」扫码/输码 → 云函数调 /api/wx/qr/confirm
        ④ 本页每 2s 轮询 GET /api/wx/qr/<t>；status 变 ok 时带 ?take=1 取走 token
-          （一次性，取走即销毁）→ 交给 _afterAuth()，与密码登录同一条落地路径。 */
+          （一次性，取走即销毁）→ 交给 _afterAuth()，与密码登录同一条落地路径。
+
+     ⚠️ [20261017] **整条链路已下线**：登录页的「微信扫码登录」区块（console4.html 里
+     的 #lgWxEntry/#lgWxPanel）连同小程序侧的「确认网页登录」页一起删了 —— 确认端没了，
+     入口留着就是个点开只能等、谁也确认不了二维码的死路。
+     下面这些函数因此变成**死代码**，刻意保留以便将来恢复：入口 HTML 一恢复即可复活。
+     它们不会被自动调用（唯一入口是已删的 data-click），且取元素处都有 null 保护。 */
   _wxView(show){
     const f=document.getElementById('loginForm'),
           e=document.getElementById('lgWxEntry'),
@@ -4606,7 +4612,6 @@ Loaders.daily=async function(){
                下拉里给「今天（实时）」+ 近 30 天，有存档的那几天额外标注。 */
             '<select id="drDate" class="drSel" title="留空 = 今天（实时生成）"></select>'+
             '<button class="drBtn drBtn--ico" title="往后一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="1">'+MI('chevron_right','text-[16px]')+'</button>'+
-            '<button class="drBtn" title="回到今天（实时生成）" data-click="Actions.drToday">'+MI('calendar_today','text-[15px]')+'今天</button>'+
           '</div>'+
           '<label class="drGrp" id="drScopeWrap"><span class="drLb">范围</span><select id="drScope" class="drSel"><option value="all">全部账号</option><option value="cur">当前账号</option></select></label>'+
           '<span id="drSnapWrap"></span>'+
