@@ -2484,8 +2484,10 @@ function _puApply(){
       const on=!!(nt.configured&&nt.enabled!==false);
       const kindId=(u.is_admin?'sys_admin':'member')+((App.state.isAdmin&&uids.length)?(' · '+uids.length+' 个抖音号'):'');
       const uidTxt=App.state.isAdmin?(uids.length?uids.join(', '):'未关联抖音号'):'仅本人';
-      const chTxt=nt.configured?(nt.channel_label||nt.channel||'已配置'):'未配置推送通道';
-      const pushTxt=chTxt+(nt.configured?((nt.enabled!==false)?' · 已启用':' · 已停用')+(nt.daily!==false?' · 早报开':' · 早报关'):'');
+      const _ch=nt.configured?_chShort(nt.channel_label||nt.channel||'已配置'):null;
+      const chTxt=_ch?_ch.name:'未配置推送通道';
+      /* [v16.4] 手机端同理收紧；顺带删掉「状态」行 —— 它和「推送」行讲的是同一件事 */
+      const pushTxt=nt.configured?(chTxt+' · '+(nt.enabled!==false?'启用':'停用')+' · '+(nt.daily!==false?'早报':'无早报')):'未配置推送通道';
       const _wx=u.wx||{};
       const wxTxt=_wx.bound?(('已绑定 '+_wx.bound+' 个微信')+(_wx.nick?(' · '+_wx.nick):'')):'未绑定微信';
       Sheet._reg('pu',String(i),{
@@ -2500,8 +2502,7 @@ function _puApply(){
       return _mcardHtml('pu',String(i),
         _mcardTitle(esc(u.username)+(mine?'<span style="color:#ff7a45;font-weight:400">（我）</span>':''),esc(kindId)),
         rolePill,
-        [['推送',esc(pushTxt)],['微信',esc(wxTxt)],['抖音号',esc(uidTxt)],
-         ['状态',on?'推送已启用':(nt.configured?'推送已停用':'未启用推送')]]);
+        [['推送',esc(pushTxt)],['微信',esc(wxTxt)],['抖音号',esc(uidTxt)]]);
     }).join('');
   }
   if(!slice.length){
@@ -2549,6 +2550,14 @@ function _wxCodeSync(){
 }
 
 /* [v4 新增] 单行渲染（供 _puApply 复用） */
+/* [v16.4] 通道名拆分：'WxPusher（微信公众号推送）' → 主名 'WxPusher' 用来显示，
+   完整串降级为 hover title。既缩短了表格宽度，信息又没丢。 */
+function _chShort(label){
+  const s=String(label||'').trim();
+  const m=s.match(/^([^（(]+)[（(][^）)]*[）)]$/);
+  return {name:(m?m[1]:s).trim(),full:s};
+}
+
 function _puRow(u,idx){
   const amAdmin=App.state.isAdmin;
   const nt=u.notify||{};
@@ -2563,10 +2572,19 @@ function _puRow(u,idx){
   let push;
   if(nt.configured){
     const on=nt.enabled!==false;
-    push='<div class="flex flex-col gap-0.5">'+
-      '<div class="inline-flex items-center gap-1 text-[11px] '+(on?'text-tertiary':'text-error')+' font-mono-code-sm">'+
-        MI('check_circle','text-[13px]')+esc(nt.channel_label||nt.channel||'已配置')+'</div>'+
-      '<span class="font-mono-code-sm text-[10px] text-on-surface-variant">'+(on?'推送已启用':'已停用')+(nt.daily!==false?' · 早报开':' · 早报关')+'</span></div>';
+    const _c=_chShort(nt.channel_label||nt.channel||'已配置');
+    /* [v16.4] 原来是两行长文「WxPusher（微信公众号推送）」+「推送已启用 · 早报开」，
+       一眼扫过去一列全是灰字、还挤成两行。改成一行三段：通道名 + 状态小标 + 早报小标，
+       颜色承载语义（启用=橙 / 停用=红 / 早报=青 / 无早报=灰）。 */
+    push='<div class="flex flex-col items-start gap-1">'+
+      '<span class="inline-flex items-center gap-1 text-[11px] '+(on?'text-tertiary':'text-error')+' font-mono-code-sm" title="'+esc(_c.full)+'">'+
+        MI(on?'check_circle':'error','text-[13px]')+esc(_c.name)+'</span>'+
+      /* 徽章要「作为一个整体」换行：平铺在同一个 flex-wrap 里时，通道名占位会把
+         后面的徽章顶下去、两个徽章被拆到两行（v16.4 试出来的）。 */
+      '<span class="inline-flex items-center gap-1.5">'+
+      '<span class="puTag'+(on?' puTag--on':' puTag--off')+'">'+(on?'启用':'停用')+'</span>'+
+      '<span class="puTag'+(nt.daily===false?' puTag--mute':' puTag--daily')+'">'+(nt.daily===false?'无早报':'早报')+'</span>'+
+      '</span></div>';
   }else{
     push='<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono-code-sm text-on-surface-variant border border-outline-variant/30 bg-surface-container whitespace-nowrap">'+
       '<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>未配置</span>';

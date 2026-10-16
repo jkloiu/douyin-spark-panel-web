@@ -1953,3 +1953,26 @@ html.msopen,html.msopen body{overflow:hidden!important}
    —— 手机端是同一个 bug，一起修掉。 */
 .fcarMsg{display:block;-webkit-line-clamp:none}
 .fcarMsg>.fcarMsgT{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* ── [v16.4] 面板用户「推送通道」列：状态小标 ─────────────────────────
+   原来是两行长文「WxPusher（微信公众号推送）」+「推送已启用 · 早报开」，
+   一列灰字挤成两行、扫不出重点。改成一行三段：通道名 + 状态小标 + 早报小标，
+   颜色承载语义（启用=橙 / 停用=红 / 早报=青 / 无早报=灰）。
+   手机端卡片走纯文本、不吃这些类，这里全局定义即可。 */
+.puTag{
+  display:inline-flex;align-items:center;
+  padding:1px 7px;border-radius:9999px;
+  font-size:10px;line-height:1.6;font-family:inherit;font-weight:500;
+  white-space:nowrap;border:1px solid transparent;
+}
+.puTag--on{background:rgba(255,122,69,.14);border-color:rgba(255,122,69,.34);color:#ff7a45}
+.puTag--off{background:rgba(239,68,68,.13);border-color:rgba(239,68,68,.32);color:#f87171}
+.puTag--daily{background:rgba(45,212,191,.13);border-color:rgba(45,212,191,.30);color:#5eead4}
+.puTag--mute{background:rgba(139,149,167,.12);border-color:rgba(139,149,167,.26);color:#8b95a7}
+
+/* [v16.4] 「推送通道」列只给一个接近自然宽度的下限（132px），让「通道名」与
+   两个徽章保持「上行名字 / 下行两枚徽章」的整齐两行。
+   ⚠️ 别给这一列加更大的 min-width：试过 158/174px，表格被撑宽后
+   右侧「操作」列的按钮会被截断（重置密码/删除点不到）—— 为了让徽章并成一行
+   而牺牲功能按钮，代价远大于收益。手机端表格由 .mcards 取代，不吃这条。 */
+.puTable th:nth-child(3),.puTable td:nth-child(3){min-width:132px}
