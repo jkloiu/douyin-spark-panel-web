@@ -1,4 +1,12 @@
 /*================ 基础设施 ================*/
+/* [v16.5] 标记「跑在安卓 App 内置 WebView 里」：window.AndroidApp 是 App 注入的 JS 桥，
+   浏览器里不存在 → 这里对网页端零影响。
+   用途：App 里隐藏「微信扫码登录」入口 —— 手机扫不了自己屏幕上的二维码，
+   而手输 6 位码还得让用户在另一台设备上配合，在 App 里只有挫败感没有帮助。
+   放在文件最前面：必须在任何界面渲染之前打上标记，否则登录页会先闪一下再消失。 */
+try{
+  if(typeof window!=='undefined'&&window.AndroidApp)document.documentElement.classList.add('is-app');
+}catch(e){}
 const ICON={
   flame:'<svg class="svgic" viewBox="0 0 24 24"><path d="M12 2c1 3-2 4.5-2 7.5C10 12 12 13 12 13s3.5-1.8 3.5-5c2 1.8 3.2 4 3.2 6.5A6.7 6.7 0 0 1 12 21a6.7 6.7 0 0 1-6.7-6.5C5.3 9.5 8.5 6 12 2z"/></svg>',
   users:'<svg class="svgic" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-5 6-5s6 1.7 6 5"/><path d="M16 5.2a3 3 0 0 1 0 5.6M18 20c0-2.4-1-4-2.8-4.8"/></svg>',
@@ -2607,9 +2615,13 @@ function _puRow(u,idx){
         :('<span class="wxPillOff"><span class="wxDot off"></span>未绑定</span>'))+
       (wx.nick?('<span class="wxNick" title="'+esc(wx.nick)+'">'+esc(wx.nick)+'</span>'):'')+
       (n&&masks.length?('<span class="wxMasked" title="'+esc(masks.join(' / '))+'">'+esc(masks.join(' / '))+'</span>'):'')+
-      (amAdmin?('<div class="wxBtnRow">'+
-        '<button type="button" class="wxBtn on" data-click="Actions.wxBindCode" data-arg="'+esc(u.username)+'" title="生成 10 分钟有效的一次性绑定码">'+MI('qr_code_2','text-[13px]')+'生成绑定码</button>'+
-        (n?('<button type="button" class="wxBtn danger" data-click="Actions.wxUnbind" data-args="'+esc(u.username)+'|'+n+'" title="解除该账号的全部微信绑定">解绑</button>'):'')+
+      (amAdmin&&n?('<div class="wxBtnRow">'+
+        /* [v16.5] 「生成绑定码」入口已撤下（v1.9.5 起「登录即自动绑定」覆盖了本人自助场景：
+           在小程序输一次账号密码就绑上了，管理员不用再生成码、再口头传达）。
+           解绑保留 —— 换绑必须走管理员显式解绑，是有意保留的人工确认，不能一起去掉。
+           后端 /api/panel-users/<u>/wx/bind-code 与小程序 wx-link 页保持可用，
+           团队/代管场景（用户不知道密码、密码由管理员掌握）仍需要绑定码这条路。 */
+        '<button type="button" class="wxBtn danger" data-click="Actions.wxUnbind" data-args="'+esc(u.username)+'|'+n+'" title="解除该账号的全部微信绑定">解绑</button>'+
         '</div>'):'')+
       '</div>';
   }
@@ -4582,20 +4594,25 @@ Loaders.daily=async function(){
           '<div class="min-w-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">火花守护日报</h2>'+
           '<p class="text-body-sm font-body-sm text-outline truncate" id="drGen">按抖音号拆分</p></div>'+
         '</div>'+
-        '<div class="flex items-center gap-2 flex-wrap">'+
-          /* [v6.20] 日期切换：‹ › 按「有存档的日期」跳 + 「今天」回实时，见 drStep/drToday */
-          '<div class="flex items-center gap-1.5">'+
-            '<span class="text-body-sm font-body-sm text-outline">日期</span>'+
-            '<button class="h-8 w-8 rounded-lg border border-outline-variant/30 bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface flex items-center justify-center transition-all" title="往前一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="-1">'+MI('chevron_left','text-[16px]')+'</button>'+
-            '<input type="date" id="drDate" class="dark-input" style="height:32px" title="留空 = 今天（实时生成）；只能查今天及更早" max="'+drToday()+'">'+
-            '<button class="h-8 w-8 rounded-lg border border-outline-variant/30 bg-surface-container hover:bg-surface-container-high text-on-surface-variant hover:text-on-surface flex items-center justify-center transition-all" title="往后一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="1">'+MI('chevron_right','text-[16px]')+'</button>'+
-            '<button class="h-8 px-3 rounded bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors" title="回到今天（实时生成）" data-click="Actions.drToday">'+MI('calendar_today','text-[15px]')+'今天</button>'+
+        /* [v16.5] 整个筛选栏统一成 .drBar/.drBtn/.drSel 一套外观。此前 ‹ › 是 32×32
+           rounded-lg、「今天」「查询」是 rounded+px-3、「立即推送」是 px-3.5，
+           圆角/内边距/边框三样都不一样，扫过去像五组控件而不是一组筛选条件。 */
+        '<div class="drBar">'+
+          '<div class="drGrp">'+
+            '<span class="drLb">日期</span>'+
+            '<button class="drBtn drBtn--ico" title="往前一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="-1">'+MI('chevron_left','text-[16px]')+'</button>'+
+            /* [v16.5] 日期由 <input type="date"> 改成 <select>：原生日期框在安卓 App 的
+               WebView 里唤不起选择器（点了没反应）；桌面虽能用，但外观和旁边控件对不齐。
+               下拉里给「今天（实时）」+ 近 30 天，有存档的那几天额外标注。 */
+            '<select id="drDate" class="drSel" title="留空 = 今天（实时生成）"></select>'+
+            '<button class="drBtn drBtn--ico" title="往后一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="1">'+MI('chevron_right','text-[16px]')+'</button>'+
+            '<button class="drBtn" title="回到今天（实时生成）" data-click="Actions.drToday">'+MI('calendar_today','text-[15px]')+'今天</button>'+
           '</div>'+
-          '<label class="text-body-sm font-body-sm text-outline" id="drScopeWrap">范围 <select id="drScope" class="dark-input" style="height:32px"><option value="all">全部账号</option><option value="cur">当前账号</option></select></label>'+
+          '<label class="drGrp" id="drScopeWrap"><span class="drLb">范围</span><select id="drScope" class="drSel"><option value="all">全部账号</option><option value="cur">当前账号</option></select></label>'+
           '<span id="drSnapWrap"></span>'+
-          '<label class="text-body-sm font-body-sm text-outline flex items-center gap-1.5 cursor-pointer"><input type="checkbox" id="drSess" checked class="accent-[#ff7a45]"> 校验登录态</label>'+
-          '<button class="h-8 px-3 rounded bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors" data-click="Loaders.daily" data-args="true">'+MI('search','text-[16px]')+'查询</button>'+
-          '<button class="h-8 px-3.5 rounded bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold flex items-center gap-1.5 active:scale-95 transition-all" data-click="Actions.pushDailyReport" data-pass-this="1">'+MI('send','text-[16px]')+'立即推送给我</button>'+
+          '<label class="drGrp drGrp--chk"><input type="checkbox" id="drSess" checked class="accent-[#ff7a45]"><span class="drLb">校验登录态</span></label>'+
+          '<button class="drBtn" data-click="Loaders.daily" data-args="true">'+MI('search','text-[16px]')+'查询</button>'+
+          '<button class="drBtn drBtn--pri" data-click="Actions.pushDailyReport" data-pass-this="1">'+MI('send','text-[16px]')+'立即推送给我</button>'+
         '</div>'+
       '</div>'+
       /* [v6.11] 「存档日期」快捷入口行按用户要求移除（查历史日报仍可用上方日期输入框） */
@@ -4834,6 +4851,46 @@ Loaders.daily=async function(){
 };
 
 function drToday(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');}
+/*================ [v16.5] 日报日期控件（<input type=date> → <select>）================
+   为什么要换：原生日期框在**安卓 App 的 WebView 里唤不起选择器**（点了没反应），
+   桌面虽能用但外观和旁边控件对不齐。换成下拉后两端都能选，且能统一成一套样式。
+
+   ⚠️ 换 <select> 带出来的一个坑（不处理就会静默失效）：
+      给 <select> 赋一个**不存在的 value** 时，浏览器不会报错，而是把选中项弹回
+      第一项（这里第一项是「今天（实时）」）。而 drStep/drPickDate 都会跳到
+      下拉列表范围之外的日期 —— 症状就是「点了 ‹ 日期却不动」。
+      所以所有写入都必须走 drSetDate()，由它按需补一个临时 option。 */
+function drSetDate(ds){
+  const sel=document.getElementById('drDate');
+  if(!sel)return;
+  if(sel.tagName!=='SELECT'){sel.value=ds||'';return;}     /* 旧站仍是 input[type=date] 时保持原行为 */
+  ds=String(ds||'');
+  if(ds&&!Array.prototype.some.call(sel.options,function(o){return o.value===ds;})){
+    const op=document.createElement('option');
+    op.value=ds;op.textContent=ds+' · 无存档';
+    /* 插到「今天（实时）」之后，保持整体降序 */
+    if(sel.firstElementChild)sel.insertBefore(op,sel.firstElementChild.nextSibling);
+    else sel.appendChild(op);
+  }
+  sel.value=ds;
+}
+/* 填充下拉：今天（实时）+ 近 30 天自然日，有存档的标注出来。
+   必须等 drLoadDates() 把 _drDates 填好之后调用，否则标不出「有存档」。 */
+function drFillDates(){
+  const sel=document.getElementById('drDate');
+  if(!sel||sel.tagName!=='SELECT')return;
+  const keep=sel.value||'';
+  const arch={};drDates().forEach(function(x){if(x)arch[x]=1;});
+  const base=new Date();base.setHours(12,0,0,0);           /* 正午取值，避开夏令时/时区跨日 */
+  let h='<option value="">今天（实时）</option>';
+  for(let i=0;i<30;i++){
+    const d=new Date(base.getTime()-i*86400000);
+    const ds=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+    h+='<option value="'+ds+'">'+ds+(arch[ds]?' · 有存档':'')+'</option>';
+  }
+  sel.innerHTML=h;
+  if(keep)drSetDate(keep);
+}
 function drTrig(t){t=t||'';return t==='panel'?'手动查看':(t.indexOf('cron')===0?('定时 '+t.slice(5)):t);}
 /* [v6.20] 存档日期清单（近 7 天留在 daily_reports/*.json，更早的已打包成 daily-<date>.tar.gz）
    —— 两个出口：
@@ -4861,6 +4918,9 @@ async function drLoadDates(){
       box.innerHTML=h;
     }
   }catch(e){App.state._drDates=[];}
+  /* [v16.5] 日期清单到位后再填下拉，否则标不出「有存档」那几天。
+     放在 try/catch 之后 → 请求失败时也会填（下拉仍可用，只是没有存档标注）。 */
+  try{drFillDates();}catch(e){}
 }
 /* 登录态单独异步校验：curl 抖音较慢，不能挡着日报首屏 */
 async function drFillSessions(force){
@@ -5352,8 +5412,9 @@ function _togglePwd(){var e=document.getElementById('loginPass');if(!e)return;e.
 /* 日报：立即把当前视角的日报推到自己配置的通道（微信/企业微信等） */
 /* 点存档日期 = 跳到那天的日报 */
 Actions.drPickDate=function(el){
-  const d=el.getAttribute('data-date'), n=document.getElementById('drDate');
-  if(n)n.value=(n.value===d)?'':d;    // 再点一次回到今天
+  const d=el.getAttribute('data-date');
+  const cur=(document.getElementById('drDate')||{}).value||'';
+  drSetDate(cur===d?'':d);                               // 再点一次回到今天
   Loaders.daily(true);
 };
 /* [v6.20] 日报日期 ‹ › 步进：优先跳到「有存档的日期」，没有可跳的就按自然日加减。
@@ -5374,20 +5435,18 @@ Actions.drStep=function(dir){
     target=newer.length?newer[0]:today;                    // 已是最新 → 回今天
   }
   if(target>today)target=today;
-  if(inp)inp.value=(target===today?'':target);
+  drSetDate(target===today?'':target);
   Loaders.daily(true);
 };
-/* [v6.20] 回到今天（清空输入框 = 实时生成） */
+/* [v6.20] 回到今天（清空选择 = 实时生成） */
 Actions.drToday=function(){
-  const inp=document.getElementById('drDate');
-  if(inp)inp.value='';
+  drSetDate('');
   Loaders.daily(true);
 };
 /* [v6.20] 空状态里点某个「有数据的日期」直接跳过去 */
 Actions.drPick=function(day){
-  const inp=document.getElementById('drDate');
   const v=String(day||'');
-  if(inp)inp.value=(v===drToday()?'':v);
+  drSetDate(v===drToday()?'':v);
   Loaders.daily(true);
 };
 /* 点登录态那一行 = 忽略缓存强制重校验（刚重新登录抖音号时用） */

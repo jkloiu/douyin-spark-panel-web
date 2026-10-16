@@ -1976,3 +1976,41 @@ html.msopen,html.msopen body{overflow:hidden!important}
    右侧「操作」列的按钮会被截断（重置密码/删除点不到）—— 为了让徽章并成一行
    而牺牲功能按钮，代价远大于收益。手机端表格由 .mcards 取代，不吃这条。 */
 .puTable th:nth-child(3),.puTable td:nth-child(3){min-width:132px}
+
+/* ── [v16.5] 日报筛选栏：统一一套外观 ────────────────────────────────
+   此前五种控件三种长相：‹ › 是 32×32 rounded-lg、今天/查询是 rounded+px-3、
+   立即推送是 px-3.5 + 强调色、范围是 dark-input、校验登录态是纯文字。
+   圆角 / 内边距 / 边框三样全不一致，扫过去像五组控件而不是一组筛选条件。
+   现在统一到 .drBar / .drGrp / .drBtn / .drSel，高度一律 32px。 */
+.drBar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.drGrp{display:inline-flex;align-items:center;gap:6px}
+.drGrp--chk{cursor:pointer;user-select:none}
+.drLb{font-size:13px;line-height:1;color:#8b95a7;white-space:nowrap}
+.drBtn{
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  height:32px;padding:0 12px;border-radius:9px;
+  font-size:13px;line-height:1;white-space:nowrap;
+  background:#1b2331;color:#dee2f1;border:1px solid rgba(255,255,255,.10);
+  transition:background .15s ease,color .15s ease,border-color .15s ease;
+}
+.drBtn:hover{background:#232c3d;color:#fff}
+.drBtn:active{transform:scale(.97)}
+.drBtn--ico{width:32px;padding:0}
+.drBtn--pri{background:#ff7a45;border-color:#ff7a45;color:#fff;font-weight:500}
+.drBtn--pri:hover{background:#ff925c;border-color:#ff925c;color:#fff}
+.drSel{
+  height:32px;padding:0 26px 0 10px;border-radius:9px;
+  font-size:13px;line-height:30px;color:#dee2f1;
+  background:#0f141f url("data:image/svg+xml;charset=utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238b95a7' stroke-width='3'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E") no-repeat right 8px center;
+  border:1px solid rgba(255,255,255,.10);
+  appearance:none;-webkit-appearance:none;cursor:pointer;
+  min-width:132px;max-width:190px;
+}
+.drSel:focus{outline:none;border-color:rgba(255,122,69,.55)}
+.drSel option{background:#151b26;color:#dee2f1}
+
+/* [v16.5] App 内取消「微信扫码登录」入口：手机扫不了自己屏幕上的二维码，
+   手输 6 位码又得让用户在另一台设备上配合 —— 在 App 里只有挫败感。
+   标记由 app_v4.js 开头打（window.AndroidApp 桥），浏览器里零影响。 */
+.is-app #lgWxEntry{display:none!important}
+.is-app #lgWxPanel{display:none!important}
