@@ -561,7 +561,11 @@ const MTAB={
   }
 };
 const App={
-  state:{overview:null,friends:null,status:null,records:null,poll:null,accounts:[],currentAccount:null,accountsReady:false,isAdmin:false,loginUser:'',scrapedContacts:null,scrapedHidden:false,showNonMutual:false,puAvatar:{}},
+  state:{overview:null,friends:null,status:null,records:null,poll:null,accounts:[],currentAccount:null,accountsReady:false,isAdmin:false,loginUser:'',scrapedContacts:null,scrapedHidden:false,showNonMutual:false,puAvatar:{},
+    /* [v16.2] 登录页微信扫码：票据 + 两个定时器（轮询票据状态 / 倒计时刷新文案） */
+    _wxTicket:null,_wxPoll:null,_wxTick:null,_wxExpire:0,_wxDone:false,
+    /* [v16.2] 面板用户页「绑定码横幅」：{user, code, expireAt} + 每秒刷剩余时间的定时器 */
+    _wxCode:null,_wxCodeTick:null},
   /* [修复20260924跨用户残留] 登出/登录切换用户时必须清空上一账号态的账号与业务数据。
      原先登出只删 localStorage，App.state.accounts 与 #accMenu / #accSwitch 全部残留，
      同一标签页再登录另一个用户（尤其无绑定账号的普通用户）时，右上角会继续显示
@@ -591,6 +595,9 @@ const App={
     document.getElementById('login').style.display='flex';
     document.getElementById('loginErr').textContent=msg||'';
     if(this.state.poll){clearInterval(this.state.poll);this.state.poll=null;}
+    /* [v16.2] 回到登录页 = 结束任何进行中的扫码流程，否则会留着上一轮的轮询在后台跑 */
+    if(this._wxStop)this._wxStop();
+    if(this._wxView)this._wxView(false);
   },
   logout(){if(!confirm('确认退出登录？'))return;const tok=localStorage.getItem('panel_token');const doClear=()=>{this.resetAccountUI();localStorage.removeItem('panel_token');localStorage.removeItem('panel_user');try{localStorage.removeItem('panel_imp_root');}catch(e){}this.showLogin('已退出，请重新登录');};if(tok){fetch('/api/logout',{method:'POST',headers:{'X-Panel-Token':tok}}).then(r=>{doClear();}).catch(e=>{doClear();});}else{doClear();}},
   /* [v6.13] 「进入工作台」统一入口：密码登录、管理员免密切换面板用户都走这里
@@ -643,6 +650,111 @@ const App={
       toast('连接成功','服务器时间 '+((st&&st.now)||''),'ok');
     }catch(e){if(e.message!=='unauthorized')err.textContent='验证失败：'+e.message;}
     btn.disabled=false;btn.innerHTML='<svg class="svgic" viewBox="0 0 24 24" style="stroke:#fff"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3"/></svg> 登录';
+  },
+  /* ══════════ 微信扫码登录 [v16.2 / 20261016] ══════════
+     为什么长这样：微信开放平台的「网站应用」要企业主体 + 备案域名，走不通；
+     于是借自家小程序做一次性凭据的传递（桥密钥只在云函数侧，网页全程不接触）：
+
+       ① POST /api/wx/qr/new        → {ticket, code}  code = 6 位登录码，TTL 5 分钟
+       ② GET  /api/wx/qr/img/<t>    → 服务端出二维码 PNG（内容就是那 6 位）
+       ③ 用户在小程序「我的 → 网页登录确认」扫码/输码 → 云函数调 /api/wx/qr/confirm
+       ④ 本页每 2s 轮询 GET /api/wx/qr/<t>；status 变 ok 时带 ?take=1 取走 token
+          （一次性，取走即销毁）→ 交给 _afterAuth()，与密码登录同一条落地路径。 */
+  _wxView(show){
+    const f=document.getElementById('loginForm'),
+          e=document.getElementById('lgWxEntry'),
+          p=document.getElementById('lgWxPanel');
+    if(f)f.style.display=show?'none':'';
+    if(e)e.style.display=show?'none':'';
+    if(p)p.style.display=show?'':'none';
+  },
+  _wxStop(){
+    if(this.state._wxPoll){clearInterval(this.state._wxPoll);this.state._wxPoll=null;}
+    if(this.state._wxTick){clearInterval(this.state._wxTick);this.state._wxTick=null;}
+    this.state._wxTicket=null;this.state._wxDone=false;
+  },
+  _wxTip(msg,bad){
+    const t=document.getElementById('lgWxTip');
+    if(!t)return;
+    t.innerHTML=msg;
+    t.classList.toggle('bad',!!bad);
+  },
+  cancelWxLogin(){
+    this._wxStop();this._wxView(false);
+    const e=document.getElementById('loginErr');if(e)e.textContent='';
+  },
+  /* 「刷新二维码」= 换一张新票据重来（旧票据在后端等 TTL 自然过期，不用管） */
+  refreshWxQr(){return this.startWxLogin();},
+  async startWxLogin(){
+    this._wxStop();this._wxView(true);
+    const e0=document.getElementById('loginErr');if(e0)e0.textContent='';
+    const img=document.getElementById('lgWxQr'),
+          mask=document.getElementById('lgWxQrMask'),
+          codeEl=document.getElementById('lgWxCode');
+    if(mask)mask.style.display='none';
+    if(codeEl)codeEl.textContent='------';
+    this._wxTip('正在获取二维码…');
+    let r;
+    try{
+      const lr=await fetch('/api/wx/qr/new',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});
+      r=await lr.json();
+    }catch(err){this._wxTip('网络异常，无法获取二维码',true);return;}
+    if(!r||!r.ok){this._wxTip(esc((r&&r.error)||'获取二维码失败，请点「刷新二维码」重试'),true);return;}
+    this.state._wxTicket=r.ticket;
+    this.state._wxExpire=Date.now()+((r.ttl||300)*1000);
+    if(codeEl)codeEl.textContent=r.code||'------';
+    if(img){
+      img.style.display='';
+      /* 服务端没装 qrcode 库时图片接口回 503 → 退化成「只显示 6 位码手输」，不让整条链路死掉 */
+      img.onerror=function(){img.style.display='none';
+        App._wxTip('二维码图片不可用，请在小程序里<b>手输上面的登录码</b>',false);};
+      img.src='/api/wx/qr/img/'+encodeURIComponent(r.ticket);
+    }
+    this._wxTickText();
+    this.state._wxPoll=setInterval(()=>{this._wxPollOnce();},2000);
+    this.state._wxTick=setInterval(()=>{this._wxTickText();},1000);
+  },
+  _wxTickText(){
+    if(this.state._wxDone||!this.state._wxTicket)return;
+    const left=Math.max(0,Math.round((this.state._wxExpire-Date.now())/1000));
+    if(left<=0){
+      this._wxStop();
+      const mask=document.getElementById('lgWxQrMask');
+      if(mask)mask.style.display='flex';
+      this._wxTip('二维码已过期，请点「刷新二维码」重新获取',true);
+      return;
+    }
+    this._wxTip('等待扫码确认… 剩余 <b>'+Math.floor(left/60)+':'+String(left%60).padStart(2,'0')+'</b>');
+  },
+  async _wxPollOnce(){
+    const t=this.state._wxTicket;
+    if(!t||this.state._wxDone)return;
+    let v;
+    try{
+      const lr=await fetch('/api/wx/qr/'+encodeURIComponent(t));
+      v=await lr.json();
+    }catch(err){return;}          /* 网络抖一下而已，等下一轮，别弹错 */
+    const s=(v&&v.status)||'expired';
+    if(s==='pending')return;
+    if(s==='unbound'){this._wxStop();this._wxTip(esc((v&&v.reason)||'这个微信还没有绑定面板账号'),true);return;}
+    if(s==='expired')return;      /* 交给倒计时那条统一报过期，免得两个提示打架 */
+    /* s === 'ok'：票据已被小程序确认，取走 token（一次性，取走即销毁） */
+    this.state._wxDone=true;
+    this._wxTip('已确认，正在进入工作台…');
+    let ld=null;
+    try{
+      const lr=await fetch('/api/wx/qr/'+encodeURIComponent(t)+'?take=1');
+      ld=await lr.json();
+    }catch(err){ld=null;}
+    if(!ld||!ld.ok||!ld.token){
+      this.state._wxDone=false;
+      this._wxTip(esc((ld&&ld.error)||'取登录票据失败，请点「刷新二维码」重试'),true);
+      return;
+    }
+    this._wxStop();
+    try{localStorage.removeItem('panel_imp_root');}catch(e){}   /* 微信登录 = 结束任何「模拟身份」 */
+    const st=await App._afterAuth(ld);
+    toast('微信登录成功','服务器时间 '+((st&&st.now)||''),'ok');
   },
   route(){
     /* [v9] 与 _curView() 同口径：hash 里 "视图:参数" 只取冒号前那段做视图名 */
@@ -2371,10 +2483,13 @@ function _puApply(){
       const uidTxt=App.state.isAdmin?(uids.length?uids.join(', '):'未关联抖音号'):'仅本人';
       const chTxt=nt.configured?(nt.channel_label||nt.channel||'已配置'):'未配置推送通道';
       const pushTxt=chTxt+(nt.configured?((nt.enabled!==false)?' · 已启用':' · 已停用')+(nt.daily!==false?' · 早报开':' · 早报关'):'');
+      const _wx=u.wx||{};
+      const wxTxt=_wx.bound?(('已绑定 '+_wx.bound+' 个微信')+(_wx.nick?(' · '+_wx.nick):'')):'未绑定微信';
       Sheet._reg('pu',String(i),{
         username:u.username,mine:mine,kindId:kindId,
         role:(u.is_admin?'管理员':'普通用户'),uids:uidTxt,channel:chTxt,on:on,
         daily:!!(nt.configured&&nt.daily!==false),
+        wxTxt:wxTxt,wxBound:_wx.bound||0,wxMasks:(_wx.openids||[]).join(' / '),
         canDel:!!(App.state.isAdmin&&!u.is_admin&&u.username!==App.state.loginUser)});
       const rolePill=u.is_admin
         ?'<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-primary-container/15 text-primary-container border border-primary-container/30 whitespace-nowrap">管理员</span>'
@@ -2382,12 +2497,12 @@ function _puApply(){
       return _mcardHtml('pu',String(i),
         _mcardTitle(esc(u.username)+(mine?'<span style="color:#ff7a45;font-weight:400">（我）</span>':''),esc(kindId)),
         rolePill,
-        [['推送',esc(pushTxt)],['抖音号',esc(uidTxt)],
+        [['推送',esc(pushTxt)],['微信',esc(wxTxt)],['抖音号',esc(uidTxt)],
          ['状态',on?'推送已启用':(nt.configured?'推送已停用':'未启用推送')]]);
     }).join('');
   }
   if(!slice.length){
-    tb.innerHTML='<tr><td colspan="6" class="py-8 text-center text-on-surface-variant text-body-md font-body-md">没有匹配的用户</td></tr>';
+    tb.innerHTML='<tr><td colspan="7" class="py-8 text-center text-on-surface-variant text-body-md font-body-md">没有匹配的用户</td></tr>';
   }else{
     tb.innerHTML=slice.map(u=>_puRow(u,all.indexOf(u))).join('');
   }
@@ -2402,10 +2517,33 @@ function _puApply(){
     h+='<button class="px-2.5 py-1 rounded bg-surface-container border border-outline-variant/30 text-on-surface hover:border-outline-variant'+(page>=pages?' opacity-40':'')+'" '+(page>=pages?'disabled':'')+' data-click="_puPage" data-arg="'+(page+1)+'">下一页</button>';
     pg.innerHTML=h;
   }
+  _wxCodeSync();
 }
 function _puSearch(v){App.state._puQ=(v||'');App.state._puPage=1;_puApply();}
 function _puRole(v){App.state._puRole=(v||'all');App.state._puPage=1;_puApply();}
 function _puPage(p){App.state._puPage=Number(p)||1;_puApply();}
+
+/* [v16.2] 绑定码横幅的倒计时：单条 1s 定时器只改「剩余」那一格文本，不整页重渲染；
+   到点自动收掉横幅（过期的码留在屏幕上只会误导）。 */
+function _wxCodeSync(){
+  if(App.state._wxCodeTick){clearInterval(App.state._wxCodeTick);App.state._wxCodeTick=null;}
+  const c=App.state._wxCode;
+  if(!c)return;
+  const paint=()=>{
+    const el=document.getElementById('wxCodeLeft');
+    if(!el){if(App.state._wxCodeTick){clearInterval(App.state._wxCodeTick);App.state._wxCodeTick=null;}return;}
+    const left=Math.max(0,Math.round((c.expireAt-Date.now())/1000));
+    if(left<=0){
+      if(App.state._wxCodeTick){clearInterval(App.state._wxCodeTick);App.state._wxCodeTick=null;}
+      App.state._wxCode=null;
+      _puApply();
+      return;
+    }
+    el.textContent=Math.floor(left/60)+':'+String(left%60).padStart(2,'0');
+  };
+  paint();
+  App.state._wxCodeTick=setInterval(paint,1000);
+}
 
 /* [v4 新增] 单行渲染（供 _puApply 复用） */
 function _puRow(u,idx){
@@ -2436,6 +2574,22 @@ function _puRow(u,idx){
   if(amAdmin&&!u.is_admin&&u.username!==App.state.loginUser)
     acts+='<button class="px-2 py-1 text-body-sm text-error hover:bg-error/10 rounded transition-colors" data-click="Actions.panelUserDel" data-arg="'+esc(u.username)+'">删除</button>';
   acts+='</div>';
+  /* [v16.2] 微信绑定：码由管理员在此生成，用户拿去小程序里换绑定；解绑是整账号清空
+     （前端只拿得到脱敏 openid，没法指定解哪一个；实际场景一个账号也就一个微信） */
+  let wxCell='';
+  {
+    const wx=u.wx||{},n=wx.bound||0,masks=(wx.openids||[]);
+    wxCell='<div class="wxCell">'+
+      (n?('<span class="wxPill"><span class="wxDot"></span>已绑定 '+n+' 个微信</span>')
+        :('<span class="wxPillOff"><span class="wxDot off"></span>未绑定</span>'))+
+      (wx.nick?('<span class="wxNick" title="'+esc(wx.nick)+'">'+esc(wx.nick)+'</span>'):'')+
+      (n&&masks.length?('<span class="wxMasked" title="'+esc(masks.join(' / '))+'">'+esc(masks.join(' / '))+'</span>'):'')+
+      (amAdmin?('<div class="wxBtnRow">'+
+        '<button type="button" class="wxBtn on" data-click="Actions.wxBindCode" data-arg="'+esc(u.username)+'" title="生成 10 分钟有效的一次性绑定码">'+MI('qr_code_2','text-[13px]')+'生成绑定码</button>'+
+        (n?('<button type="button" class="wxBtn danger" data-click="Actions.wxUnbind" data-args="'+esc(u.username)+'|'+n+'" title="解除该账号的全部微信绑定">解绑</button>'):'')+
+        '</div>'):'')+
+      '</div>';
+  }
   /* [20261014b] 面板落库头像优先；回退到本浏览器头像库选择 */
   const _paid=avGet('pu',u.username||'');
   const _puUrl=avPanelUrl(u.username||'');
@@ -2456,6 +2610,7 @@ function _puRow(u,idx){
       '</div></div></td>'+
     '<td class="py-3.5 px-3">'+role+'</td>'+
     '<td class="py-3.5 px-3">'+push+'</td>'+
+    '<td class="py-3.5 px-3">'+wxCell+'</td>'+
     '<td class="py-3.5 px-3"><div class="flex flex-col font-mono-code-sm max-w-[190px]">'+
       (amAdmin
         ?(uids.length?('<span class="text-on-surface text-[11px] truncate" title="'+esc(uids.join(', '))+'">'+esc(uids.join(', '))+'</span><span class="text-[10px] text-on-surface-variant">'+uids.length+' 个关联账号</span>')
@@ -2550,10 +2705,26 @@ Loaders.panelusers=async()=>{
       '</div>';
     html+='</div>';
 
+    /* [v16.2] 微信绑定码横幅：生成后停在卡顶，带秒级倒计时（到点自己收掉，不留过期码在屏幕上）。
+       码本身是后端内存里的一次性凭据，这里只负责展示 + 复制。 */
+    const _wxc=App.state._wxCode;
+    if(amAdmin&&_wxc&&_wxc.user){
+      html+='<div class="wxBindBar" id="wxBindBar">'+
+        MI('qr_code_2','wxBindIc')+
+        '<div class="wxBindTx">小程序绑定码 · 账号「<b>'+esc(_wxc.user)+'</b>」'+
+          '<span class="wxBindHint">在小程序「我的 → 微信绑定」里输入这个码，10 分钟内有效</span></div>'+
+        '<b class="wxBindCode" id="wxBindCode">'+esc(_wxc.code)+'</b>'+
+        '<span class="wxBindLeft" id="wxCodeLeft">--:--</span>'+
+        '<button type="button" class="wxBindCopy" data-click="Actions.wxCodeCopy">复制码</button>'+
+        '<button type="button" class="wxBindX" title="关闭" data-click="Actions.wxCodeClose">'+MI('close','text-[15px]')+'</button>'+
+        '</div>';
+    }
+
     /* [v6.15] 手机端：6 列表格换成卡片（#puCards），点卡片弹层看完整字段与操作 */
     html+='<div class="overflow-x-auto msrc-hidden" id="puWrap"><table class="w-full text-left border-collapse">'+
       '<thead><tr class="border-b border-outline-variant/20 bg-background/50 text-label-uppercase font-label-uppercase text-on-surface-variant">'+
       '<th class="py-3 px-4">用户名 &amp; 账号</th><th class="py-3 px-3">角色权限</th><th class="py-3 px-3">推送通道</th>'+
+      '<th class="py-3 px-3">微信绑定</th>'+
       '<th class="py-3 px-3">关联抖音号</th><th class="py-3 px-3 text-center">状态</th><th class="py-3 px-4 text-right">操作</th>'+
       '</tr></thead><tbody id="puTbody" class="divide-y divide-outline-variant/15 text-body-md font-body-md"></tbody></table></div>'+
       '<div class="mcards mcards-flush" id="puCards"></div>';
@@ -3160,6 +3331,46 @@ const Actions={
       if(r.ok){toast('密码已修改',name,'ok');Loaders.panelusers();}
       else toast('修改失败',r.error||'','err');
     }catch(e){toast('修改失败',e.message,'err');}
+  },
+  /* ══ [v16.2] 微信绑定（面板用户页） ══════════════════════════════════
+     管理员在面板生成 6 位一次性绑定码 → 用户在小程序「我的 → 微信绑定」里输入
+     → 云函数带 openid 调 /api/wx/bind 落库到该账号。码 TTL 10 分钟、用完即废。 */
+  wxBindCode:async(name)=>{
+    try{if(window.Sheet)Sheet.close();}catch(e){}
+    try{
+      const r=await api('/api/panel-users/'+encodeURIComponent(name)+'/wx/bind-code',{method:'POST',body:{}});
+      if(!r.ok){toast('生成失败',r.error||'','err');return;}
+      App.state._wxCode={user:name,code:r.code,expireAt:Date.now()+((r.ttl||600)*1000)};
+      /* 横幅是「整张用户列表卡」模板里生成的，_puApply() 只重画 tbody/卡片
+         —— 所以这里必须整页重渲染，不能只靠 _wxCodeSync() 起个倒计时。 */
+      await Loaders.panelusers();
+      toast('绑定码 '+r.code,
+            (r.reused?'复用上次未过期的码':'')+'10 分钟内在小程序「我的 → 微信绑定」输入',
+            'ok');
+    }catch(e){toast('生成失败',e.message,'err');}
+  },
+  /* 复制走 Actions.copyText：它内部已处理「http 非安全上下文 → execCommand 兜底」 */
+  wxCodeCopy:()=>{
+    const c=App.state._wxCode;
+    if(c)Actions.copyText(c.code);
+  },
+  wxCodeClose:()=>{
+    if(App.state._wxCodeTick){clearInterval(App.state._wxCodeTick);App.state._wxCodeTick=null;}
+    App.state._wxCode=null;
+    const el=document.getElementById('wxBindBar');if(el)el.remove();
+  },
+  wxUnbind:async(name,cnt)=>{
+    try{if(window.Sheet)Sheet.close();}catch(e){}
+    const n=Number(cnt)||0;
+    if(!window.confirm('确认解除「'+name+'」的'+(n>1?('全部 '+n+' 个'):'')+'微信绑定？\n解绑后该微信将无法再免密登录本面板，也收不到微信侧的任何授权。'))return;
+    try{
+      const r=await api('/api/panel-users/'+encodeURIComponent(name)+'/wx/unbind',{method:'POST',body:{}});
+      if(r.ok){
+        if(App.state._wxCode&&App.state._wxCode.user===name)Actions.wxCodeClose();
+        toast('已解除微信绑定',name,'ok');
+        Loaders.panelusers();
+      }else toast('解绑失败',r.error||'','err');
+    }catch(e){toast('解绑失败',e.message,'err');}
   },
   async scrapeContacts(btn){
     const done=_busy(btn);
@@ -5376,13 +5587,20 @@ const Sheet={
       let acts='<button type="button" data-click="Actions.openAvatarPicker" data-args="pu|'+esc(r.username)+'">更换头像</button>'+
         '<button type="button" data-click="Actions.pushEditUser" data-arg="'+esc(r.username)+'">通知设置</button>'+
         '<button type="button" data-click="Actions.panelUserPwd" data-arg="'+esc(r.username)+'">重置密码</button>';
+      /* [v16.2] 微信绑定：只有管理员能生成绑定码 / 解绑（后端是 require_admin） */
+      if(App.state.isAdmin){
+        acts+='<button type="button" data-click="Actions.wxBindCode" data-arg="'+esc(r.username)+'">生成绑定码</button>';
+        if(r.wxBound)acts+='<button type="button" data-click="Actions.wxUnbind" data-args="'+esc(r.username)+'|'+r.wxBound+'">解绑微信</button>';
+      }
       if(r.canDel)acts+='<button type="button" data-click="Actions.panelUserDel" data-arg="'+esc(r.username)+'">删除用户</button>';
       return {
         title:r.username+(r.mine?'（我）':''),
         sub:esc(r.kindId||'')+(r.mine?' · 当前登录身份':''),
         kvs:[['用户名',esc(r.username)],['角色权限',r.role||'—'],['关联抖音号',esc(r.uids||'—')],
              ['推送通道',esc(r.channel||'—')],['推送状态',r.on?'已启用':'未启用'],
-             ['每日早报',r.daily?'每天 09:00 开启':'已关闭'],['账号标识',esc(r.kindId||'—')]],
+             ['每日早报',r.daily?'每天 09:00 开启':'已关闭'],
+             ['微信绑定',esc(r.wxTxt||'未绑定微信')],
+             ['微信标识',esc(r.wxMasks||'—')],['账号标识',esc(r.kindId||'—')]],
         acts:acts
       };
     }

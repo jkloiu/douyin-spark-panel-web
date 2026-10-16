@@ -1760,3 +1760,98 @@ html.msopen,html.msopen body{overflow:hidden!important}
 @media (max-width:480px){
   .flistHL .tag{display:none}
 }
+
+/* ============================================================================
+   [v16.2] 微信登录 / 微信绑定
+   —— 为什么不用 Tailwind 工具类：style4.css 是**预编译**产物，只有构建时就出现过
+      的类才在里面。新写的工具类（如 bg-[#07C160]/12）不会生效，必须落到这里。
+   ============================================================================ */
+
+/* ---------- 登录页：微信入口 ---------- */
+.wxEntry{margin-top:18px}
+.wxOr{display:flex;align-items:center;gap:10px;margin-bottom:13px}
+.wxOr span{flex:1;height:1px;background:var(--line)}
+.wxOr i{font-style:normal;font-size:11px;color:var(--txt4);font-family:var(--mono)}
+.wxEntryBtn{width:100%;height:44px;border-radius:var(--r2);display:flex;align-items:center;
+  justify-content:center;gap:8px;font-size:14px;font-weight:500;cursor:pointer;
+  color:#5be08f;background:rgba(7,193,96,.1);border:1px solid rgba(7,193,96,.34);
+  transition:background .15s,border-color .15s,transform .1s}
+.wxEntryBtn:hover{background:rgba(7,193,96,.18)}
+.wxEntryBtn:active{transform:scale(.99)}
+.wxEntryBtn svg{width:19px;height:19px;fill:currentColor;flex:none}
+
+/* ---------- 登录页：扫码面板 ---------- */
+.wxPanel{display:flex;flex-direction:column;gap:12px}
+.wxPanelHd{display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding-bottom:10px;border-bottom:1px solid var(--line)}
+.wxPanelHd b{font-size:12.5px;font-weight:600;color:var(--txt)}
+.wxLink{background:none;border:none;padding:0;cursor:pointer;font-size:12px;color:var(--txt3)}
+.wxLink:hover{color:var(--txt)}
+.wxQrBox{position:relative;width:232px;height:232px;flex:none;margin:2px auto 0;
+  border-radius:var(--r2);background:#fff;overflow:hidden;
+  box-shadow:0 0 0 1px var(--line),0 8px 22px -10px rgba(0,0,0,.7)}
+.wxQrBox img{display:block;width:232px;height:232px}
+.wxQrMask{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:9px;background:rgba(14,19,29,.9);
+  color:var(--txt2);font-size:12px;text-align:center;padding:14px}
+.wxQrMask .sp{width:26px;height:26px;border-width:2px}
+.wxCodeRow{display:flex;align-items:baseline;justify-content:center;gap:10px}
+.wxCodeLbl{font-size:11px;color:var(--txt3)}
+.wxCodeVal{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:.2em;
+  color:var(--orange);padding:0 .2em 0 .2em}
+.wxTip{font-size:12px;color:var(--txt2);text-align:center;min-height:17px;line-height:1.5}
+.wxTip.bad{color:var(--red)}
+.wxTip b{color:var(--txt);font-family:var(--mono)}
+.wxSteps{margin:0;padding-left:20px;font-size:11.5px;color:var(--txt3);line-height:1.8}
+.wxSteps li{list-style:decimal}
+.wxRefresh{height:34px;border-radius:var(--r3);cursor:pointer;display:inline-flex;
+  align-items:center;justify-content:center;gap:6px;font-size:12.5px;color:var(--txt2);
+  background:rgba(255,255,255,.04);border:1px solid var(--line);transition:all .15s}
+.wxRefresh:hover{color:var(--txt);background:rgba(255,255,255,.08)}
+.wxRefresh .material-symbols-outlined{font-size:16px}
+
+/* ---------- 面板用户页：微信列 ---------- */
+.wxCell{display:flex;flex-direction:column;gap:4px;align-items:flex-start;min-width:0}
+.wxPill{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
+  font-size:11px;font-family:var(--mono);white-space:nowrap;
+  color:#5be08f;background:rgba(7,193,96,.12);border:1px solid rgba(7,193,96,.3)}
+.wxPillOff{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:999px;
+  font-size:11px;font-family:var(--mono);white-space:nowrap;
+  color:var(--txt3);background:rgba(255,255,255,.03);border:1px solid var(--line)}
+.wxDot{width:6px;height:6px;border-radius:50%;background:#07C160;flex:none}
+.wxDot.off{background:#3b475d}
+.wxCell .wxNick{font-size:10.5px;color:var(--txt3);max-width:160px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.wxCell .wxMasked{font-size:10px;color:var(--txt4);font-family:var(--mono);max-width:180px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wxBtnRow{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px}
+.wxBtn{display:inline-flex;align-items:center;gap:4px;padding:3px 8px;border-radius:7px;
+  font-size:11px;cursor:pointer;white-space:nowrap;transition:all .15s;
+  color:var(--txt2);background:rgba(255,255,255,.04);border:1px solid var(--line)}
+.wxBtn:hover{color:var(--txt);border-color:var(--line2);background:rgba(255,255,255,.07)}
+.wxBtn.on{color:#5be08f;background:rgba(7,193,96,.1);border-color:rgba(7,193,96,.3)}
+.wxBtn.on:hover{background:rgba(7,193,96,.18)}
+.wxBtn.danger{color:var(--red);background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.28)}
+.wxBtn.danger:hover{background:rgba(239,68,68,.16)}
+
+/* ---------- 面板用户页：绑定码横幅 ---------- */
+.wxBindBar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 16px;
+  background:rgba(7,193,96,.07);border-bottom:1px solid rgba(7,193,96,.22)}
+.wxBindIc{font-size:19px;color:#5be08f;flex:none}
+.wxBindTx{font-size:12px;color:var(--txt2);min-width:0;flex:1}
+.wxBindTx b{color:var(--txt)}
+.wxBindHint{display:block;font-size:10.5px;color:var(--txt3);margin-top:1px}
+.wxBindCode{font-family:var(--mono);font-size:19px;font-weight:700;letter-spacing:.16em;
+  color:#5be08f;background:rgba(0,0,0,.24);border-radius:6px;padding:2px 10px 2px 12px;
+  white-space:nowrap}
+.wxBindLeft{font-family:var(--mono);font-size:11px;color:var(--txt3)}
+.wxBindCopy,.wxBindX{cursor:pointer;background:rgba(255,255,255,.05);border:1px solid var(--line);
+  color:var(--txt2);border-radius:7px;font-size:11px;padding:3px 8px;transition:all .15s}
+.wxBindCopy:hover,.wxBindX:hover{color:var(--txt);background:rgba(255,255,255,.09)}
+.wxBindX{margin-left:auto;display:inline-flex;align-items:center;padding:3px 6px}
+/* 窄屏：横幅换行成两行，码和倒计时单独一行居中 */
+@media (max-width:640px){
+  .wxBindBar{padding:10px 12px;gap:8px}
+  .wxBindTx{flex:1 1 100%}
+  .wxBindCode{margin-left:auto}
+}
