@@ -1855,3 +1855,101 @@ html.msopen,html.msopen body{overflow:hidden!important}
   .wxBindTx{flex:1 1 100%}
   .wxBindCode{margin-left:auto}
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   [v16.3] 桌面端（≥1024px）单独适配
+   ----------------------------------------------------------------------
+   需求：「电脑端的总览、好友与火花、执行台账、面板用户需要单独的优化适配」。
+   症状都是同一类 —— 这几页的版式当初是照手机（小程序）排的，到宽屏上就出现
+   「控件各自撑满一整行」「卡片单列、横向大片留白」「表格列被挤到中文按字折行」。
+
+   三条硬约束（照做才不会踩坑）：
+     ① **只 append 桌面规则**：手机端一条都不动 —— 小程序同款外壳是刻意做的，
+        不能因为宽屏改版被带跑偏。
+     ② **宽度基准要认 --ui-scale**：≥1440 时 html{zoom:var(--ui-scale)}（默认 1.25），
+        媒体查询仍按设备宽度命中，但布局宽 = 设备宽 / zoom。所以「按视口算」的长度
+        一律要写 calc(100vh / var(--ui-scale) - …)，否则会撑出屏幕（v6.13 踩过）。
+        实际基准：设备 1024~1439 → 无缩放，内容宽 756~1171；
+                  设备 1440 → 缩放 1.25，内容宽只有 884（比 1280 设备还窄，非单调！）；
+                  设备 ≥1600 → 内容宽 ≥1012。
+     ③ 断点选 1024 而不是 1200：1024~1439 无缩放时内容宽 ≥756，两列卡片放得下。
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── 1) 总览：好友火花列表改由 CSS 管高度 ──────────────────────────────
+   原来高度写在 inline style 里（max-height:430px）。总览在桌面是「两行卡 + 一张长列表」，
+   430px 在手机上合适，到 1440/1920 就变成「第 4 行以后要靠卡内滚动 + 页面底部空一大片」。
+   现在：手机仍 430px；桌面取「视口高 - 列表顶部偏移」，让整页正好落在一屏内。 */
+#ovSparkList{max-height:430px}
+
+/* ── 2) 好友与火花：卡片列表改多列网格 ─────────────────────────────────
+   auto-fill + minmax 自适应，不用堆断点：内容宽 756~1011 → 2 列，1268 → 3 列，1536 → 4 列。
+   minmax 取 340px 是按下限反推的：卡片内容宽 340-26=314，
+   最挤的 .fcarOps（单独续火 92 + 4 个图标钮 112 + 间距 30 = 234）放得下。
+   分页 / 搜索 / 排序是靠切换 display 实现的，grid 容器天然兼容。 */
+
+/* ── 3) 执行台账：顶部四个控件收成一条工具栏 ───────────────────────────
+   .recBar 是 [v16.3] 在 _recRender() 里新加的包裹层。手机端它就是个普通 div，
+   子元素仍整宽堆叠（与改版前逐像素一致）；桌面端才变成横向工具栏。
+   ⚠️ .seg / .tabs / .fchip 内部都是 flex:1 + 横向 padding:0（靠 flex:1 撑宽），
+   搬到工具栏里必须同时改成 flex:0 0 auto 并补横向 padding，否则会被拉满且文字贴边。 */
+
+/* ── 4) 面板用户：操作列不再「按字」折行 ───────────────────────────────
+   根因不是列宽不够，而是**中文默认可在任意字符处断行** —— 列被压到 20px 宽时
+   「通知设置」就竖着排成「通/知/设/置」。给表头与操作按钮加 nowrap 后，
+   空间不够时浏览器只能重新分配列宽（列宽不可能小于 min-content），列够宽自然不折。
+   同时给表格一个 min-width：真放不下时在 #puWrap 里横向滚动，而不是把字挤成竖排。
+   （配套改动：去掉重复的「状态」列 —— 它的信息已经在「推送通道」列里，
+     见 app_v4.js 的 _puRow；手机卡片 mcards 仍是原来 4 行，未受影响。） */
+
+/* ── 5) 抖音账号：新增账号条压成一行 ───────────────────────────────────
+   该区块已挪到页面最上方（app_v4.js），桌面端把「标题 / 输入 / 提示」压成
+   「标题 + 输入 + 按钮」一行、提示单独一行。 */
+
+@media (min-width:1024px){
+  /* ── 1) 总览 ─────────────────────────────────────────────────────── */
+  /* 338 = 顶栏 64 + #content 上内边距 24 + 「今日发送 / 火花总览」那一行 ~163
+     + 卡片间距 24 + 「好友火花」卡头 63（实测列表顶边距视口顶 330，留 8px 余量） */
+  #ovSparkList{max-height:calc(100vh / var(--ui-scale) - 338px);min-height:320px}
+  /* 里程条不再被压到 260px：桌面让它吃掉整行剩余宽度（flex-wrap 仍在，
+     真放不下时这一格自己换行，不会顶破卡片） */
+  #content #view-overview .ov-rk .ov-rk-mile{order:0;flex:1 1 200px;max-width:none}
+  #content #view-overview .ov-rk .ov-rk-st{order:0}
+  #content #view-overview .ov-rk .ov-rk-name{flex:0 0 140px}
+
+  /* ── 2) 好友与火花 ───────────────────────────────────────────────── */
+  .fcardList{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+  .fcardList>.empty{grid-column:1/-1}
+
+  /* ── 3) 执行台账 ─────────────────────────────────────────────────── */
+  .recBar{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .recBar>.seg,.recBar>.tabs,.recBar>.fbar,.recBar>.dsel{margin:0;flex:0 0 auto;min-width:0}
+  /* ⚠️ 内层也必须 flex:0 0 auto：.seg__i/.tabs__i/.fchip 原本是 flex:1（basis 0%），
+     在外层已经按内容定宽的情况下，它们会继续等分「剩余宽度 - 左侧说明文字」，
+     结果「只看当前账号」被挤成两行、「全部 164」被挤成两行（实测踩过）。 */
+  .recBar>.seg>.seg__i{flex:0 0 auto;padding:6px 12px;white-space:nowrap}
+  .recBar>.tabs>.tabs__i{flex:0 0 auto;padding:9px 12px;white-space:nowrap}
+  .recBar>.fbar>.fchip{flex:0 0 auto;padding:7px 11px;white-space:nowrap}
+  .recBar>.seg>.seg__note{margin-left:6px;white-space:nowrap}
+  .recBar>.dsel>.dsel__t{flex:0 1 auto}
+
+  /* ── 5) 抖音账号 ─────────────────────────────────────────────────── */
+  #addAccBox{flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px}
+  #addAccBox>div:nth-child(2){flex:0 0 auto}
+  #addAccBox>div:last-child{flex:1 1 100%}
+}
+
+/* ── 4) 面板用户：与断点无关（表格 ≥768px 就在用） ───────────────────── */
+.puTable{min-width:820px}                       /* = 6 列 min-content 之和，放不下就横向滚 */
+.puTable thead th{white-space:nowrap}
+.puTable .puActs>button{white-space:nowrap}
+
+/* ── 2b) 好友卡片「最后一条」的 2 行截断：修一个一直都存在的漏字 bug ─────────
+   现象：卡片窄（手机上一直是，桌面改两列后也是）时，第 3 行的**字头会漏出来**，
+   在 .fcarMsg 的下内边距里显示半行残字。
+   根因：-webkit-line-clamp 的裁切边界是「内边距盒」，而它并不移除第 3 行的排版 ——
+   第 3 行照旧从内容盒底部开始排，于是正好落进那 7px 下内边距。
+   解法：外层只管内边距与外框，clamp 挪到**无内边距的内层** .fcarMsgT，
+   其裁切边界正好压在第 3 行起点上。与视口宽度无关，所以不加媒体查询
+   —— 手机端是同一个 bug，一起修掉。 */
+.fcarMsg{display:block;-webkit-line-clamp:none}
+.fcarMsg>.fcarMsgT{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}

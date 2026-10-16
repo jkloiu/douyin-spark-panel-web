@@ -2065,12 +2065,15 @@ Loaders.overview=async function(){
       :k==='paused'?['text-outline bg-surface-container border-surface-container-highest','bg-[#3b475d]']
       :['text-[#f59e0b] bg-[rgba(245,158,11,.12)] border-[rgba(245,158,11,.35)]','bg-[#f59e0b]'];
 
-    html+='<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] flex flex-col min-w-0">';
+    /* [v16.3] 桌面端单独适配：卡片和列表都挂 id —— 桌面把列表改成「填满剩余视口高度」，
+       原来 inline 的 max-height:430px 在小屏合适，在 1440/1920 下会让页面底部空一大片
+       而且第 5 行以后只能靠卡片内滚动看。高度同时受内容与视口约束，见 style4.css [v16.3]。 */
+    html+='<div id="ovSparkCard" class="bg-surface-container-low border border-surface-container-high rounded-[14px] flex flex-col min-w-0">';
     html+='<div class="flex items-center justify-between gap-3 px-5 py-4 border-b border-surface-container-high flex-wrap">'+
       '<div class="flex items-center gap-3 min-w-0">'+MI('local_fire_department','text-[19px] text-primary-container',1)+
         '<h3 class="text-headline-md font-headline-md font-semibold text-on-surface shrink-0">好友火花</h3></div>'+
       '<a href="#friends" class="shrink-0 inline-flex items-center gap-1 text-body-sm font-body-sm text-primary-container hover:underline">查看全部 '+MI('chevron_right','text-[16px]')+'</a></div>';
-    html+='<div class="divide-y divide-surface-container-high/50 overflow-y-auto custom-scroll" style="max-height:430px">';
+    html+='<div id="ovSparkList" class="divide-y divide-surface-container-high/50 overflow-y-auto custom-scroll">';
     if(!o.friends.length)html+='<div class="py-12 text-center text-body-sm font-body-sm text-outline">还没有好友数据</div>';
     _hot.concat(o.friends.filter(f=>f.spark_days==null)).forEach(f=>{
       const n=Number(f.spark_days)||0;
@@ -2262,7 +2265,7 @@ Loaders.friends=async function(){
             (mt?'<span class="small muted">最近 '+esc(mt.length>11?mt.slice(5,16):mt)+'</span>':'')+
             (!f.fresh?'<span class="badge b-wait">数据更新于更早</span>':'')+
           '</div>'+
-          (msg?'<div class="fcarMsg">最后一条：'+esc(msg.slice(0,140))+'</div>':'')+
+          (msg?'<div class="fcarMsg"><span class="fcarMsgT">最后一条：'+esc(msg.slice(0,140))+'</span></div>':'')+
           '<div class="fcarOps">'+
             (k==='risk'
               ?'<button class="btn btn-sm btn-danger" data-click="Actions.openMsgPicker" data-args="custom|'+esc(f.short_id)+'">'+MI('priority_high','text-[15px]')+'紧急续火</button>'
@@ -2502,7 +2505,7 @@ function _puApply(){
     }).join('');
   }
   if(!slice.length){
-    tb.innerHTML='<tr><td colspan="7" class="py-8 text-center text-on-surface-variant text-body-md font-body-md">没有匹配的用户</td></tr>';
+    tb.innerHTML='<tr><td colspan="6" class="py-8 text-center text-on-surface-variant text-body-md font-body-md">没有匹配的用户</td></tr>';
   }else{
     tb.innerHTML=slice.map(u=>_puRow(u,all.indexOf(u))).join('');
   }
@@ -2568,7 +2571,9 @@ function _puRow(u,idx){
     push='<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono-code-sm text-on-surface-variant border border-outline-variant/30 bg-surface-container whitespace-nowrap">'+
       '<span class="w-1.5 h-1.5 rounded-full bg-outline"></span>未配置</span>';
   }
-  let acts='<div class="inline-flex items-center gap-1 justify-end">'+
+  /* [v16.3] 操作列：加 puActs 类 —— 桌面端每个按钮都不许在字间折行（中文默认可在任意
+     字符处断行，之前列被压窄时就变成「通/知/设/置」竖排），空间不够时整块按钮换行。 */
+  let acts='<div class="puActs inline-flex items-center gap-1 justify-end">'+
     '<button class="px-2 py-1 text-body-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high rounded transition-colors" data-click="Actions.pushEditUser" data-arg="'+esc(u.username)+'">通知设置</button>'+
     '<button class="px-2 py-1 text-body-sm text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high rounded transition-colors" data-click="Actions.panelUserPwd" data-arg="'+esc(u.username)+'">重置密码</button>';
   if(amAdmin&&!u.is_admin&&u.username!==App.state.loginUser)
@@ -2611,16 +2616,12 @@ function _puRow(u,idx){
     '<td class="py-3.5 px-3">'+role+'</td>'+
     '<td class="py-3.5 px-3">'+push+'</td>'+
     '<td class="py-3.5 px-3">'+wxCell+'</td>'+
-    '<td class="py-3.5 px-3"><div class="flex flex-col font-mono-code-sm max-w-[190px]">'+
+    '<td class="py-3.5 px-3"><div class="flex flex-col font-mono-code-sm max-w-[150px]">'+
       (amAdmin
         ?(uids.length?('<span class="text-on-surface text-[11px] truncate" title="'+esc(uids.join(', '))+'">'+esc(uids.join(', '))+'</span><span class="text-[10px] text-on-surface-variant">'+uids.length+' 个关联账号</span>')
                     :'<span class="text-[11px] text-on-surface-variant">未关联抖音号</span>')
         :'<span class="text-[11px] text-on-surface-variant">仅本人</span>')+
       '</div></td>'+
-    '<td class="py-3.5 px-3 text-center">'+((nt.configured&&nt.enabled!==false)
-      ?'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono-code-sm bg-tertiary/10 text-tertiary border border-tertiary/25 whitespace-nowrap"><span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span>启用</span>'
-      :'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-mono-code-sm bg-surface-container text-on-surface-variant border border-outline-variant/30 whitespace-nowrap"><span class="w-1.5 h-1.5 rounded-full bg-outline"></span>未启用推送</span>')+
-    '</td>'+
     '<td class="py-3.5 px-4 text-right">'+acts+'</td></tr>';
 };
 
@@ -2721,11 +2722,15 @@ Loaders.panelusers=async()=>{
     }
 
     /* [v6.15] 手机端：6 列表格换成卡片（#puCards），点卡片弹层看完整字段与操作 */
-    html+='<div class="overflow-x-auto msrc-hidden" id="puWrap"><table class="w-full text-left border-collapse">'+
+    /* [v16.3] 桌面适配：表格加 puTable 类（列宽/换行规则见 style4.css），
+       并**去掉「状态」列**——它和「推送通道」列里那行「推送已启用 / 已停用 · 早报开/关」
+       是同一份信息，重复占掉 100 多 px，正是操作列被挤到只剩 20px、中文按字竖排的主因。
+       手机端卡片（mcards）不受影响，仍保留「状态」一行。 */
+    html+='<div class="overflow-x-auto msrc-hidden" id="puWrap"><table class="w-full text-left border-collapse puTable">'+
       '<thead><tr class="border-b border-outline-variant/20 bg-background/50 text-label-uppercase font-label-uppercase text-on-surface-variant">'+
       '<th class="py-3 px-4">用户名 &amp; 账号</th><th class="py-3 px-3">角色权限</th><th class="py-3 px-3">推送通道</th>'+
       '<th class="py-3 px-3">微信绑定</th>'+
-      '<th class="py-3 px-3">关联抖音号</th><th class="py-3 px-3 text-center">状态</th><th class="py-3 px-4 text-right">操作</th>'+
+      '<th class="py-3 px-3">关联抖音号</th><th class="py-3 px-4 text-right">操作</th>'+
       '</tr></thead><tbody id="puTbody" class="divide-y divide-outline-variant/15 text-body-md font-body-md"></tbody></table></div>'+
       '<div class="mcards mcards-flush" id="puCards"></div>';
 
@@ -2899,8 +2904,24 @@ Loaders.accounts=async(live)=>{
     };
     const BTN='h-8 px-2.5 rounded-lg border border-outline-variant/30 bg-surface-container hover:bg-surface-container-high text-on-surface text-body-sm font-medium transition-all active:scale-95';
 
+    /* ---------- 0) [v16.3] 新增账号录入条 —— 按要求挪到**页面最上方** ----------
+       原来在最底部（加账号要先滚到页尾）。现在是视图的第一个子元素，位置在
+       「工具条」之上、栅格之外 —— 于是它横向整宽，和栅格里的列表卡同宽对齐。
+       id 契约不变：addAccUid / addAccName / Actions.addAccount。
+       桌面端把「标题 + 输入 + 按钮」压成一行（见 style4.css [v16.3] 的 #addAccBox）。 */
+    let html='<div id="addAccBox" class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/25 flex flex-col gap-3">'+
+      '<div class="flex items-center gap-2"><span class="text-headline-md font-headline-md text-[15px] font-semibold text-on-surface">新增账号</span>'+
+      '<span class="font-mono-code-sm text-mono-code-sm px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/40">unique_id</span></div>'+
+      '<div class="flex items-center gap-2 flex-wrap">'+
+        '<input id="addAccUid" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline-variant focus:border-primary-container outline-none transition-colors" placeholder="新账号抖音号 unique_id" style="width:210px">'+
+        '<input id="addAccName" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline-variant focus:border-primary-container outline-none transition-colors" placeholder="备注名（可选）" style="width:160px">'+
+        '<button class="h-9 px-3.5 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95" data-click="Actions.addAccount">添加账号</button>'+
+      '</div>'+
+      '<div class="text-[11px] text-on-surface-variant leading-relaxed">多账号时按 TASKS 逐个执行；写操作前自动备份 .env。添加后需导入 cookie 或扫码登录才能参与续火花。</div>'+
+      '</div>';
+
     /* ---------- 页面工具条（Stitch 04 稿 header 右侧 + 副标题） ---------- */
-    let html='<div class="flex items-center justify-between gap-3 flex-wrap">';
+    html+='<div class="flex items-center justify-between gap-3 flex-wrap">';
     html+='<div class="flex items-center gap-3 min-w-0">'+
       '<span class="text-body-sm font-body-sm text-on-surface-variant">共 <b class="text-on-surface">'+acc.length+'</b> 个账号 · 登录态每轮任务前校验</span>'+
       '<span class="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant/20 font-mono-code-sm text-mono-code-sm text-on-surface-variant">'+
@@ -2913,6 +2934,8 @@ Loaders.accounts=async(live)=>{
 
     /* ===== 左 8 栏 ===== */
     html+='<div class="col-span-12 flex flex-col gap-5">';
+
+    /* [v16.3] 「新增账号录入条」原在此处（本栏最底），已整块上移到视图最前面（上面的 0)） */
 
     /* 1) 筛选条 */
     html+='<div class="flex items-center justify-between gap-3 flex-wrap bg-surface-container-low p-3.5 rounded-2xl border border-outline-variant/25">';
@@ -2933,7 +2956,7 @@ Loaders.accounts=async(live)=>{
 
     /* 2) 账号行列表 */
     if(!acc.length){
-      html+='<div class="p-8 text-center rounded-2xl bg-surface-container-low border border-outline-variant/25 text-on-surface-variant text-body-md font-body-md">暂无账号，请在下方添加（抖音号 unique_id）</div>';
+      html+='<div class="p-8 text-center rounded-2xl bg-surface-container-low border border-outline-variant/25 text-on-surface-variant text-body-md font-body-md">暂无账号，请在上方「新增账号」里添加（抖音号 unique_id）</div>';
     }else if(!_alist.length){
       html+='<div class="p-8 text-center rounded-2xl bg-surface-container-low border border-outline-variant/25 text-on-surface-variant text-body-md font-body-md">当前筛选条件下没有账号</div>';
     }else{
@@ -3040,17 +3063,7 @@ Loaders.accounts=async(live)=>{
       '<span>共 '+_sumCk+' 条 cookie'+(_badCk?(' · '+_badCk+' 个账号解析异常'):' · 全部解析正常')+'</span>');
     html+='</div></div>';
 
-    /* 4) 新增账号录入条（保留 v3 的 id 契约：addAccUid / addAccName） */
-    html+='<div id="addAccBox" class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/25 flex flex-col gap-3">'+
-      '<div class="flex items-center gap-2"><span class="text-headline-md font-headline-md text-[15px] font-semibold text-on-surface">新增账号</span>'+
-      '<span class="font-mono-code-sm text-mono-code-sm px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/40">unique_id</span></div>'+
-      '<div class="flex items-center gap-2 flex-wrap">'+
-        '<input id="addAccUid" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline-variant focus:border-primary-container outline-none transition-colors" placeholder="新账号抖音号 unique_id" style="width:210px">'+
-        '<input id="addAccName" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline-variant focus:border-primary-container outline-none transition-colors" placeholder="备注名（可选）" style="width:160px">'+
-        '<button class="h-9 px-3.5 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95" data-click="Actions.addAccount">添加账号</button>'+
-      '</div>'+
-      '<div class="text-[11px] text-on-surface-variant leading-relaxed">多账号时按 TASKS 逐个执行；写操作前自动备份 .env。添加后需导入 cookie 或扫码登录才能参与续火花。</div>'+
-      '</div>';
+    /* [v16.3] 原「4) 新增账号录入条」已整块上移到本栏最前面（见上面的 0)） */
     html+='</div>'; /* /左 8 栏 */
     html+='</div>'; /* /栅格 */
 
@@ -4173,7 +4186,13 @@ function _recRender(){
   const _daySet={};
   recs.forEach(function(r){if(r.day)_daySet[r.day]=(_daySet[r.day]||0)+1;});
   App.state._recDaySet=_daySet;
-  let h='';
+  /* [v16.3] 桌面端单独适配：顶部四个控件（seg / tabs / fbar / dsel）先攒到 _bar 里，
+     最后统一包进 .recBar。手机端 .recBar 就是个普通块容器（子元素仍是整宽堆叠，
+     布局与之前逐字节一致）；桌面端 .recBar 变横向工具栏、子项按内容宽度，
+     不再每个控件各占一整行。
+      注意：seg / tabs 的分段控件内部是 flex:1，桌面必须一起改成 flex:0 0 auto，
+      否则在 .recBar 里仍会被拉满。 */
+  let h='',_bar='';
   /* [v13.3] 段序与控件形态照抄小程序 pages/records/records.wxml：
        ① seg（只看当前账号 / 全部账号，>1 个号才显示）
        ② tabs（发送记录 / 运行日志，分段控件而非按钮）
@@ -4183,7 +4202,7 @@ function _recRender(){
   const _sc=App.state._recScope||'cur';
   const _accs=App.state.accounts||[];
   if(_accs.length>1){
-    h+='<div class="seg">'+
+    _bar+='<div class="seg">'+
       [['cur','只看当前账号'],['all','全部账号']].map(function(x){
         return '<button class="seg__i'+(_sc===x[0]?' seg__i--on':'')+'" data-click="_recScope" data-arg="'+x[0]+'">'+x[1]+'</button>';
       }).join('')+
@@ -4193,7 +4212,7 @@ function _recRender(){
   }
 
   /* ---------- tabs（小程序 .tabs：卡片底 + 描边，选中态 primary-soft 底 + primary 字） ---------- */
-  h+='<div class="tabs">'+
+  _bar+='<div class="tabs">'+
     [['records','发送记录'],['logs','运行日志']].map(function(x){
       return '<button class="tabs__i'+(tab===x[0]?' tabs__i--on':'')+'" data-click="Actions.recTab" data-arg="'+x[0]+'">'+x[1]+
         (x[0]==='records'?'<span class="tabs__n">'+recs.length+'</span>':'')+'</button>';
@@ -4209,13 +4228,13 @@ function _recRender(){
     const _tc=App.state._recType||'';
     const _td=App.state._recDate||'';
     const chip=(k,t,n)=>'<button class="fchip'+(_tc===k?' fchip--on':'')+'" data-click="_recType" data-arg="'+k+'">'+t+' '+n+'</button>';
-    h+='<div class="fbar">'+chip('','全部',recs.length)+chip('batch','批量',nBatch)+chip('single','单独',nSingle)+'</div>';
+    _bar+='<div class="fbar">'+chip('','全部',recs.length)+chip('batch','批量',nBatch)+chip('single','单独',nSingle)+'</div>';
     /* [v14] 日期选择器 = 「触发按钮 + 日历弹层」（.dsel / .cal）。
        原来是 21 个日期芯片挤在一条横向滚动条里：桌面端鼠标滚轮滚不动、手机上要滑很久，
        而且只能选「已加载记录里出现过的日期」——用户反馈「不能筛选日期」。
        现在点一下弹出整月日历：有记录的日期带橙点、今天描边、选中填橙，
        上下月翻页 + 「今天 / 全部日期」两个快捷动作，任意日期都能选（选了没记录会明确提示）。 */
-    h+='<div class="dsel'+(_td?' dsel--on':'')+'" data-click="_recCalToggle" role="button" tabindex="0" '+
+    _bar+='<div class="dsel'+(_td?' dsel--on':'')+'" data-click="_recCalToggle" role="button" tabindex="0" '+
       'title="按日期筛选">'+MI('calendar_month','text-[17px]')+
       '<span class="dsel__t">'+(_td?esc(_recDayLabel(_td)):'全部日期')+'</span>'+
       '<span class="dsel__arrow">&#9662;</span></div>';
@@ -4260,7 +4279,8 @@ function _recRender(){
     }else h+='<div class="empty">暂无日志</div>';
     h+='</div>';
   }
-  el.innerHTML=h;
+  /* [v16.3] .recBar 收口：日历弹层（.calMask/.cal 是 position:fixed）留在 h 里无所谓位置 */
+  el.innerHTML='<div class="recBar">'+_bar+'</div>'+h;
   if(tab==='records')_recPaint();
   else{
     const b=document.getElementById('recLogBox');
