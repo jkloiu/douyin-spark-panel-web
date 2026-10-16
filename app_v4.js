@@ -4660,9 +4660,13 @@ Loaders.daily=async function(){
     const sw=document.getElementById('drSnapWrap');
     if(sw){
       const sn=d.snapshots||[];
-      sw.innerHTML=sn.length>1?('<label class="text-body-sm font-body-sm text-outline">快照 <select id="drSnap" class="dark-input" style="height:32px">'+
+      /* [v16.6] 这个下拉之前是 .dark-input + 无类名的 <label>，只在「某天有多份快照」时才出现
+         —— 于是切到 10/8、10/9 这类被多次生成过的日子，它就带着另一套长相突然冒出来，
+         正是用户说的「上面那些按钮的格式会变」。现在改用 .drGrp/.drLb/.drSel，
+         和日期/范围是同一套外观、同一高度，出现与消失都不再改变工具栏的排版。 */
+      sw.innerHTML=sn.length>1?('<span class="drGrp"><span class="drLb">快照</span><select id="drSnap" class="drSel" title="同一天有多份日报时选择看哪一次">'+
         sn.map(s=>'<option value="'+s.i+'"'+(s.i===d.snapshot_index?' selected':'')+'>'+
-          esc((s.at||'').slice(11,16)||s.at)+' '+esc(drTrig(s.trigger))+'</option>').join('')+'</select></label>'):'';
+          esc((s.at||'').slice(11,16)||s.at)+' '+esc(drTrig(s.trigger))+'</option>').join('')+'</select></span>'):'';
       const ns=document.getElementById('drSnap');if(ns)ns.addEventListener('change',()=>Loaders.daily(true));
     }
     /* [v6.11] drLoadDates()（存档日期快捷入口）已随 drArch 行一起下线 */
