@@ -1237,18 +1237,25 @@ _V9A.fdOpen=function(sid){
   if(!sid){toast('这条记录缺少好友标识','','err');return;}
   location.hash='#frienddetail:'+sid;
 };
-/* [v11] 抓火花进度：只更新抓取卡上的按钮与副标题，不重绘整页 */
+/* [v11] 抓火花进度：只更新抓取卡上的按钮与副标题，不重绘整页
+   [v16.1] 按钮挪到「好友火花」头部后内部变成「图标 + 文案」，
+   所以文案要写进 .gbFull/.gbShort 两个 span（手机端走 .gbShort），
+   不再直接 b.textContent=…（那会把图标一并冲掉）。 */
 function _sparkUi(){
   var busy=!!App.state._sparkBusy;
+  var sec=App.state._sparkSec||0;
   var tip=document.getElementById('sparkTip');
-  if(tip)tip.textContent=(App.state._sparkMsg||'每天 06:00 自动抓取')+(busy&&App.state._sparkSec?(' · 已用 '+App.state._sparkSec+'s'):'');
+  if(tip)tip.textContent=(App.state._sparkMsg||'每天 06:00 自动抓取')+(busy&&sec?(' · 已用 '+sec+'s'):'');
   var b=document.getElementById('sparkGrabBtn');
   if(b){
-    if(busy){b.disabled=true;b.textContent='抓取中 '+(App.state._sparkSec||0)+'s';}
-    else{b.disabled=false;b.textContent='立即抓取';}
+    var full=b.querySelector('.gbFull'),short=b.querySelector('.gbShort');
+    if(full)full.textContent=busy?('抓取中 '+sec+'s'):'立即抓取';
+    if(short)short.textContent=busy?(sec+'s'):'抓取';
+    if(!full&&!short)b.textContent=busy?('抓取中 '+sec+'s'):'立即抓取';
+    b.disabled=busy;
   }
   var d=document.querySelector('.grabDot');
-  if(d)d.className='grabDot'+(busy?' on':'');
+  if(d)d.classList.toggle('on',busy);
 }
 
 /* ============ ① 抓取联系人（pages/contacts） ============ */
@@ -1906,21 +1913,15 @@ Loaders.overview=async function(){
         '</div>'+
       '</div>');
 
-    /* ---------- 2) 火花总览 ---------- */
-    let _chips='';
-    const _chip=(cls,txt)=>'<span class="badge '+cls+'">'+txt+'</span>';
-    if(_nDanger)_chips+=_chip('b-no','危险 '+_nDanger);
-    if(_nWarn)_chips+=_chip('b-wait','注意 '+_nWarn);
-    if(_nOk)_chips+=_chip('b-gray','正常 '+_nOk);
-    if(_nSent)_chips+=_chip('b-gray','今日已续 '+_nSent);
-    if(_nPend)_chips+=_chip('b-wait','今日未续 '+_nPend);
-    if(_nStale)_chips+=_chip('b-gray','数据陈旧 '+_nStale);
+    /* ---------- 2) 火花总览 ----------
+       [v16.1] 按要求删掉原来的状态徽章排（危险 / 注意 / 正常 / 今日已续 /
+       今日未续 / 数据陈旧）—— 与三格 KPI 的「需关注」重复，胶囊多了只显噪。
+       现在只保留三格 KPI。 */
     html+=_CARD(_HEAD('local_fire_department','火花总览','<span class="text-body-sm font-body-sm text-outline">'+o.friends.length+' 位好友</span>')+
-      '<div class="px-5 py-4 flex flex-col gap-3.5">'+
+      '<div class="px-5 py-4">'+
         '<div class="grid grid-cols-3 gap-3">'+
           _kpi(maxDays,'最高天数')+_kpi(minDays,'最低天数')+_kpi(_nDanger,'需关注',_nDanger>0)+
         '</div>'+
-        (_chips?'<div class="flex flex-wrap gap-2">'+_chips+'</div>':'')+
       '</div>');
     html+='</section>';
 
@@ -2072,9 +2073,8 @@ Loaders.friends=async function(){
     const AV=(f,ring)=>'<div class="shrink-0 rounded-full overflow-hidden '+(ring?'ring-1 ring-primary-container/40':'')+'">'+avatarHtml(f.avatar,friendName(f))+'</div>';
 
     /* ---------- 1) 顶部总览卡 [v12] ----------
-       原来是 3 张 KPI 卡 + 1 张「火花数据」抓取卡 = 4 个框（手机上占 4 段高度）。
-       现合并成同一张卡：上排三格 KPI，下方一行「火花数据 · 立即抓取」。
-       纯视觉合并 —— 三个指标的字段与口径完全没变。 */
+       三格 KPI 一张卡（[v16.1] 下方那行「火花数据 · 立即抓取」已撤，
+       抓取按钮挪到「好友火花」卡头部与「批量一键续火」同一行）。 */
     const _sBusy=!!App.state._sparkBusy;
     /* [v12.1] 三格 KPI 直接复用**概览「火花总览」卡的写法**：居中小卡、数值在上标签在下。
        原来每格底下的说明（运行正常 / 今日点火 / 名单最长 / 里程碑）统一挪到下方一排徽章，
@@ -2090,15 +2090,9 @@ Loaders.friends=async function(){
     html+=_cell(maxF?maxDays:0,'天','最长连续记录');
     html+='</div>';
     /* [v12.6] 徽章排（运行正常/今日点火/容量/名单最长/里程碑）按要求隐藏 */
-    /* 抓取行（页面化小程序 spark 页顶部的 grab 卡）—— 保留 #sparkTip / #sparkGrabBtn 供 _sparkUi() 局部刷新 */
-    html+='<div class="statGrab">'+
-      '<div class="grabL">'+
-        '<div class="grabT"><i class="grabDot'+(_sBusy?' on':(staleN?' warn':''))+'"></i>火花数据</div>'+
-        '<div class="grabS" id="sparkTip">'+esc(App.state._sparkMsg||'每天 06:00 自动抓取')+'</div>'+
-      '</div>'+
-      '<button id="sparkGrabBtn" class="btn '+(_sBusy?'btn-ghost':'btn-primary')+' btn-sm"'+(App.state._sparkBusy?' disabled':'')+
-        ' data-click="Actions.startSpark" data-args="false" data-pass-this="1">'+(_sBusy?('抓取中 '+(App.state._sparkSec||0)+'s'):'立即抓取')+'</button>'+
-    '</div>';
+    /* [v16.1] 原「火花数据 · 立即抓取」独立行撤掉：抓取按钮已挪到下面
+       「好友火花」卡头部，和「批量一键续火」同一行。#sparkTip / #sparkGrabBtn
+       两个 id 都保留，_sparkUi() 的局部刷新逻辑不变。 */
     html+='</section>';
 
     /* ---------- 3) 好友火花（卡片形态，对齐小程序 spark 页；
@@ -2110,12 +2104,22 @@ Loaders.friends=async function(){
     /* [v15] 头部改成一行：左「好友火花 + 共 N 位」，右「排序 + 批量一键续火」。
        去掉了「收起列表」按钮（用户要求）——列表默认展开，不再提供收起。
        排序按钮在手机上是纯图标（.fvSortTxt 文案隐藏，title 里说明），
-       桌面端保留文案，保证 390px 屏上也挤得下一行。 */
+       桌面端保留文案，保证 390px 屏上也挤得下一行。
+       [v16.1] 「立即抓取」从上面那张统计卡挪到这里，紧挨「批量一键续火」
+       （用户要求）；副标题（#sparkTip）留在左侧标题旁，手机上隐藏。
+       按钮文案三档：桌面「立即抓取」/ ≤767px「抓取」/ ≤380px 只剩图标。 */
     html+='<section class="flistCard">';
     html+='<div class="flistHead">'+
-      '<div class="flistHL"><h2>好友火花</h2><span class="tag">共 '+d.friends.length+' 位</span></div>'+
+      '<div class="flistHL"><h2>好友火花</h2><span class="tag">共 '+d.friends.length+' 位</span>'+
+        '<span class="flistTip hide-m"><i class="grabDot'+(_sBusy?' on':(staleN?' warn':''))+'"></i>'+
+        '<span id="sparkTip">'+esc(App.state._sparkMsg||'每天 06:00 自动抓取')+'</span></span></div>'+
       '<div class="flistHR">'+
         '<button class="btn btn-ghost btn-sm" data-click="_fvSort" title="切换排序方向">'+MI('swap_vert','text-[15px]')+'<span id="fvSortTxt" class="fvSortTxt">'+(App.state._fsSort==='asc'?'火花天数升序':'火花天数倒序')+'</span></button>'+
+        '<button id="sparkGrabBtn" class="btn btn-ghost btn-sm" title="立即抓取火花数据"'+(App.state._sparkBusy?' disabled':'')+
+          ' data-click="Actions.startSpark" data-args="false" data-pass-this="1">'+MI('refresh','text-[15px]')+
+          '<span class="gbTxt gbFull">'+(_sBusy?('抓取中 '+(App.state._sparkSec||0)+'s'):'立即抓取')+'</span>'+
+          '<span class="gbTxt gbShort">'+(_sBusy?((App.state._sparkSec||0)+'s'):'抓取')+'</span>'+
+        '</button>'+
         '<button class="btn btn-primary btn-sm" data-click="Actions.openMsgPicker" data-args="main|null">'+MI('bolt','text-[15px]',1)+'批量一键续火</button>'+
       '</div></div>';
     /* 4 档筛选：手机端放在页面内（= 小程序）；桌面端沿用顶栏芯片 */

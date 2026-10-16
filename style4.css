@@ -1735,3 +1735,28 @@ html.msopen,html.msopen body{overflow:hidden!important}
   .contacts-wrap td.cact .btn{width:auto}
   .contacts-wrap td.cact .badge{width:auto;justify-content:center}
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   [v16.1] 火花页：抓取按钮从统计卡挪进「好友火花」头部（挨着批量一键续火）
+   + 概览页撤掉状态徽章排。三档按钮文案：桌面「立即抓取」/ 手机「抓取」/
+   极窄屏只剩图标（按钮上原有 title 兜底说明）。
+   ══════════════════════════════════════════════════════════════════════ */
+/* 头部左侧的抓取副标题（#sparkTip）：桌面显示、手机由 .hide-m 隐藏 */
+.flistTip{display:inline-flex;align-items:center;gap:6px;min-width:0;flex:0 1 auto;
+  font-size:12px;color:#8b95a7;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flistTip #sparkTip{overflow:hidden;text-overflow:ellipsis}
+.flistTip .grabDot{margin-top:0}
+/* 抓取按钮文案三档：桌面「立即抓取」/ 手机「抓取」/ ≤340px 只剩图标 */
+.gbShort{display:none}
+@media (max-width:767px){
+  .gbFull{display:none}
+  .gbShort{display:inline}
+}
+@media (max-width:340px){
+  .gbShort{display:none}
+}
+/* 头部一行塞不下时，先把「共 N 位」让出去（总数在 KPI 卡里已有），
+   阈值从 380px 放宽到 480px，给新加的抓取按钮腾地方。 */
+@media (max-width:480px){
+  .flistHL .tag{display:none}
+}
