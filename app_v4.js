@@ -508,6 +508,8 @@ function dispName(v){
 }
 function fmtHM(ts){return ts?ts.slice(5,16).replace('-','/'):'—';}
 function parseDisk(line){const m=(line||'').match(/(\d+)%\s+\S+\s*$/);return m?parseInt(m[1]):null;}
+/* [20261017] cronTimes() 已随 crontab 展示一起下线（原本只被任务页那处调用，
+   而它的返回值从未被使用）。若以后要恢复 crontab 面板，这里是现成的解析器。 */
 function cronTimes(cron){
   const out={main:null,custom:null};
   (cron||'').split('\n').forEach(l=>{
@@ -1760,11 +1762,8 @@ function _sysRender(){
        _kv('批量续火花',st.next.main||'—')+_kv('定时任务',st.next.custom||'—')+
        (st.next.custom_window?_kv('执行时间窗',st.next.custom_window):'')+'</div>';
   }
-  /* crontab（仅管理员） */
-  if(App.state.isAdmin&&st.crontab){
-    h+='<div class="card"><h4>'+MI('terminal','text-[17px]')+'系统 crontab<span class="tag">管理员可见</span></h4>'+
-       '<div class="mono tiny" style="white-space:pre-wrap;background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:12px;max-height:300px;overflow:auto">'+esc(st.crontab)+'</div></div>';
-  }
+  /* [20261017] crontab 原文展示已删除（见任务页同名注释）。
+     上面那几个 _kv('批量续火花'/'定时任务'/'执行时间窗') 来自 st.next，不受影响。 */
   h+='<div class="tiny muted" style="text-align:center;margin:4px 0 8px">点右上角刷新可重新拉取</div>';
   el.innerHTML=h;
 }
@@ -3870,7 +3869,8 @@ Loaders.tasks=async function(_poll){
     if(!_poll){App.state._logMain=lm;App.state._logCustom=lc;}
     App.state.status=st;if(vt&&vt.targets)App.state.validTargets=vt.targets;
     const _tt=App.currentTargets();if(_tt){fd.friends=fd.friends.filter(f=>_tt.has(f.short_id));}
-    const ct=cronTimes(st.crontab);
+    /* [20261017] 原这里有一行 const ct=cronTimes(st.crontab) —— 但 ct 定义后**从未被使用**
+       （真正显示执行时间的是后端 st.next），所以随 crontab 展示一起删掉。 */
     const schedTasks=(sc&&sc.schedule&&sc.schedule.tasks)||[];
     App.state._schedTasks=schedTasks;
 
@@ -3915,7 +3915,8 @@ Loaders.tasks=async function(_poll){
     let html='';
 
     /* ---------- 2) 定时任务 ---------- */
-    const schedIsAdmin=App.state.isAdmin;
+    /* [20261017] 原这里的 schedIsAdmin 只服务于下面那块 crontab（仅管理员可见），
+       展示删除后成为未使用变量，一并去掉。 */
     html+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] overflow-hidden shadow-sm">';
     html+='<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3 flex-wrap">'+
       '<div class="flex items-center gap-3 min-w-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface shrink-0">定时任务列表</h2>'+
@@ -4048,16 +4049,13 @@ Loaders.tasks=async function(_poll){
       '<span>单独续 '+(rc.running?'<span class="text-[#f59e0b]">运行中</span>':'空闲')+'</span></span></div>';
     html+='</section>';
 
-    /* ---------- 5) crontab（仅管理员） ---------- */
-    /* [v16] 按用户要求：这块「当前 crontab」**移动端隐藏**（≤767px），桌面照旧显示。
-       注意别和「系统状态」页那块「系统 crontab」搞混 —— 用户只要求删任务页这个。 */
-    if(schedIsAdmin){
-      html+='<section class="hide-m bg-surface-container-low border border-surface-container-high rounded-[14px] p-4 shadow-sm">'+
-        '<div class="flex items-center gap-2 mb-3">'+MI('terminal','text-[19px] text-primary-container')+
-        '<h2 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">当前 crontab</h2>'+
-        '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-label-uppercase font-label-uppercase border border-surface-container-highest">仅管理员可见</span></div>'+
-        '<pre class="bg-surface-container-lowest border border-surface-container-high rounded-lg p-3 overflow-x-auto font-mono-code-sm text-mono-code-sm text-on-surface-variant whitespace-pre-wrap">'+esc(st.crontab||'(空)')+'</pre></section>';
-    }
+    /* ---------- 5) crontab ---------- */
+    /* [20261017] 按用户要求：**所有界面的 crontab 展示全部删除**（任务页「当前 crontab」+
+       系统状态页「系统 crontab」+ 小程序系统状态页那块）。
+       注意别搞混：系统状态页仍会显示「批量续火花 / 定时任务 / 执行时间窗」，
+       那几个时间来自后端 `/api/status` 的 `next` 字段，**不依赖 crontab 原文**，
+       所以删掉原文并不会丢掉「下次执行时间」。
+       后端 `/api/status` 的 crontab 字段一并保留（可能还有别的消费方）。 */
 
     const _el=ensureView('tasks');
     if(_el.__lastHtml!==html){
