@@ -1399,56 +1399,104 @@ Loaders.contacts=async function(){
   }catch(e){viewError('contacts',e);return;}
   _ctRender();
 };
+/* [v16.9] 相对时间：今天只显示 HH:MM，今年 MM-DD，更早 YYYY-MM-DD。
+   完整时间留在 title 里，鼠标悬停可见 —— 日志/列表里那一长串
+   "2026-10-15 19:39:47" 占了半列宽，真正要看的是"多久之前"。 */
+function _ctWhen(t){
+  var s=String(t||'').trim();
+  if(!s)return {short:'—',full:''};
+  if(/^\d{2}:\d{2}$/.test(s))return {short:s,full:s+'（今天）'};
+  if(/^\d{2}-\d{2}$/.test(s))return {short:s,full:new Date().getFullYear()+'-'+s};
+  var m=s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}:\d{2}))?/);
+  if(m){
+    var d=new Date(),same=(+m[1]===d.getFullYear()&&+m[2]===d.getMonth()+1&&+m[3]===d.getDate());
+    var short=same?(m[4]||''):((+m[1]===d.getFullYear())?(m[2]+'-'+m[3]):s.slice(0,10));
+    return {short:short,full:s};
+  }
+  return {short:s,full:s};
+}
+
+/* [v16.9] 「抓取联系人」页 UI 重做。
+   原来这里是：抓取入口独占上半屏 + 「每个会话一张独立大卡」，一屏只看得到 2-3 个，
+   「可添加」只是个点不动的小 badge，会话多了也根本没法找。
+   现在：入口压成一行 + 一行式紧凑表格（复用好友页那套 .crow / contacts-wrap，
+   「添加」按钮走同一个 Actions.addContact）+ 输入即搜 —— 两处不再各画各的。 */
 function _ctRender(){
   var el=ensureView('contacts');
   var all=App.state.scrapedContacts||[];
+  var q=String(App.state._ctQ||'').trim().toLowerCase();
   var nmN=all.filter(_ctIsNm).length;
-  var shown=App.state.showNonMutual?all:all.filter(function(c){return !_ctIsNm(c);});
+  var shown=all.filter(function(c){
+    if(!App.state.showNonMutual&&_ctIsNm(c))return false;
+    if(!q)return true;
+    return (_ctName(c)+' '+(c.douyin_id||c.unique_id||'')).toLowerCase().indexOf(q)>=0;
+  });
   var ex={};(App.state.friends||[]).forEach(function(f){ex[String(f.short_id||'')]=1;});
   var acc=(App.state.accounts||[]).filter(function(a){return a.unique_id===App.state.currentAccount;})[0];
   var h='';
-  /* 抓取入口 */
-  h+='<div class="card"><h4>'+MI('group','text-[17px]')+'抓取联系人<span class="tag">读取抖音会话列表</span></h4>'+
-     '<div class="note">抓的是账号的<b>抖音聊天列表</b>，不等于好友。里面有互关聊过的人，也可能有从没聊过的空会话。</div>'+
-     '<div class="toolbar" style="margin-top:12px">'+
-       '<button class="btn btn-primary" data-click="Actions.scrapeContacts" data-pass-this="1">开始抓取'+(acc?(' · '+esc(acc.username||acc.unique_id)):'')+'</button>'+
-       (all.length?('<span class="tiny muted">已抓到 '+all.length+' 个会话</span>'):'')+
-     '</div></div>';
-  /* 非互关开关 */
-  if(nmN){
-    h+='<div class="card"><div class="row" style="border-bottom:none;padding:2px 0">'+
-       '<div class="grow"><div class="t">显示非互关空会话</div>'+
-       '<div class="s">有 '+nmN+' 个会话只有系统提示，续不了火花</div></div>'+
-       '<button class="btn btn-sm '+(App.state.showNonMutual?'btn-primary':'btn-ghost')+'" data-click="_ct_nm">'+(App.state.showNonMutual?'已显示':'已隐藏')+'</button>'+
-       '</div></div>';
-  }
-  /* 列表 */
+  /* ① 抓取入口：从一整张卡压成一行 */
+  h+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] p-4">'+
+    '<div class="flex items-center gap-3 flex-wrap">'+
+      '<div class="w-9 h-9 rounded-lg bg-primary-container/15 border border-primary-container/30 text-primary-container flex items-center justify-center shrink-0">'+MI('group','text-[19px]')+'</div>'+
+      '<div class="min-w-0 grow"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">抓取联系人</h2>'+
+      '<p class="text-body-sm font-body-sm text-outline mt-0.5">抓的是账号的<b class="text-on-surface-variant">抖音聊天列表</b>，不等于好友'+(all.length?(' · 已抓到 <b class="text-on-surface">'+all.length+'</b> 个会话'):'')+'</p></div>'+
+      '<button class="drBtn drBtn--pri" data-click="Actions.scrapeContacts" data-pass-this="1">'+MI('refresh','text-[15px]')+'开始抓取'+(acc?(' · '+esc(acc.username||acc.unique_id)):'')+'</button>'+
+    '</div></section>';
+  /* ② 工具条：搜索 + 非互关开关 + 计数 */
+  h+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] p-3 mt-4"><div class="drBar">'+
+    '<input id="ctSearch" class="drSel ctSearch" style="width:260px;max-width:none" placeholder="搜索昵称或抖音号…" data-input="_ctSearch" value="'+esc(App.state._ctQ||'')+'">'+
+    (nmN?'<button class="drBtn'+(App.state.showNonMutual?' drBtn--pri':'')+'" data-click="_ct_nm">'+MI('filter_list','text-[15px]')+(App.state.showNonMutual?'已显示':'显示')+'非互关空会话（'+nmN+'）</button>':'')+
+    '<span class="drLb">显示 '+shown.length+' / '+all.length+'</span>'+
+    (q?'<button class="drBtn" data-click="_ctClearQ">清除搜索</button>':'')+
+    '</div></section>';
+  /* ③ 紧凑表格 */
   if(!all.length){
-    h+='<div class="card"><div class="empty">这里是空的，先点上面的「开始抓取」</div></div>';
+    h+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] mt-4"><div class="py-16 text-center text-body-sm text-outline">还没有抓取记录，点上面「开始抓取」</div></section>';
   }else if(!shown.length){
-    h+='<div class="card"><div class="empty">抓到的会话全是「非互关·从未聊过」的空会话，没有可添加的人</div></div>';
+    h+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] mt-4"><div class="py-16 text-center text-body-sm text-outline">'+
+      (q?('没有匹配「'+esc(App.state._ctQ)+'」的会话'):'抓到的会话全是「非互关·从未聊过」的空会话，没有可添加的人')+'</div></section>';
   }else{
+    h+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] mt-4 overflow-hidden">'+
+      '<div class="overflow-x-auto custom-scroll" style="max-height:560px;overflow-y:auto"><table class="w-full border-collapse text-left contacts-wrap">'+
+      '<thead><tr class="border-b border-surface-container-high/80 bg-surface-container-lowest/60 text-outline text-[11px]">'+
+      '<th class="py-2.5 px-4 font-semibold">名称</th><th class="py-2.5 px-4 font-semibold">抖音号</th>'+
+      '<th class="py-2.5 px-4 font-semibold">最后一条</th><th class="py-2.5 px-4 font-semibold">时间</th>'+
+      '<th class="py-2.5 px-4 font-semibold text-right">操作</th></tr></thead>'+
+      '<tbody class="divide-y divide-surface-container-high/50">';
     shown.forEach(function(c){
       var sid=_ctSid(c),cname=_ctName(c);
       var did=c.douyin_id||c.unique_id||'';
       var already=!!(sid&&ex[sid]);
       var nonM=_ctIsNm(c);
       var pv=String(c.preview||'').trim();
-      h+='<div class="card" style="cursor:pointer'+(nonM?';opacity:.62':'')+'" data-click="Actions.openContact" data-arg="'+esc(sid)+'">'+
-        '<div style="display:flex;align-items:center;gap:12px">'+avatarHtml(c.avatar,cname)+
-          '<div class="grow" style="min-width:0">'+
-            '<div class="t" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'+esc(cname)+
-            (nonM?'<span class="badge b-gray">非互关·从未聊过</span>':'')+'</div>'+
-            '<div class="s mono">'+esc(did||'（无抖音号）')+'</div></div>'+
-          '<span class="badge '+(already?'b-ok':'b-info')+'">'+(already?'已添加':'可添加')+'</span>'+
-        '</div>'+
-        '<div class="tiny muted" style="margin-top:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+
-          '最后一条：'+esc(pv||'（无内容）')+(c.last_time?(' · '+esc(c.last_time)):'')+'</div>'+
-      '</div>';
+      var w=_ctWhen(c.last_time);
+      var tip=pv?('最后一条：'+pv+(c.last_time?('（'+c.last_time+'）'):'')):'（抖音会话列表里没有可读内容）';
+      var btn=already
+        ?'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-tertiary bg-tertiary-container/15 border-tertiary-container/30">'+MI('check','text-[12px]')+'已添加</span>'
+        :'<button class="h-7 px-3 rounded bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold active:scale-95 transition-all" '+(sid?'':'disabled')+' data-click="Actions.addContact" data-args="'+esc(sid)+'|'+esc(cname.replace(/'/g,''))+'" data-pass-this="1">添加</button>';
+      h+='<tr class="crow hover:bg-surface-container/50 transition-colors"'+(sid?' data-click="Actions.openContact" data-args="'+esc(sid)+'"':'')+(nonM?' style="opacity:.62"':'')+'>'+
+        '<td class="cname py-2.5 px-4"><div class="flex items-center gap-2.5 min-w-0">'+avatarHtml(c.avatar,cname)+
+          '<b class="text-on-surface truncate">'+esc(cname)+'</b>'+
+          (nonM?' <span class="inline-flex items-center px-1.5 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-outline bg-surface-container border-surface-container-high" title="'+esc(tip)+'">非互关</span>':'')+'</div></td>'+
+        '<td class="cid py-2.5 px-4 font-mono text-mono-code-sm text-outline">'+esc(did||'—')+'</td>'+
+        '<td class="cpv py-2.5 px-4" title="'+esc(tip)+'"><div class="cpv-t">'+esc(pv||'（无内容）')+'</div></td>'+
+        '<td class="py-2.5 px-4 font-mono text-mono-code-sm text-outline whitespace-nowrap" title="'+esc(w.full)+'">'+esc(w.short)+'</td>'+
+        '<td class="cact py-2.5 px-4 text-right">'+btn+'</td></tr>';
     });
+    h+='</tbody></table></div></section>';
   }
   el.innerHTML=h;
 }
+/* 输入即搜：委托层对 input 事件会把值作为第一个参数传进来（fn(val, el)），
+   所以这里直接收参数、不再回头 getElementById 取值（重渲染后焦点也要还回去，
+   否则连续输入会断）。 */
+function _ctSearch(val){
+  App.state._ctQ=String(val==null?'':val);
+  _ctRender();
+  var i=document.getElementById('ctSearch');
+  if(i){try{i.focus();i.setSelectionRange(i.value.length,i.value.length);}catch(e){}}
+}
+function _ctClearQ(){App.state._ctQ='';_ctRender();}
 function _ct_nm(){App.state.showNonMutual=!App.state.showNonMutual;_ctRender();}
 
 /* ============ ② 推送设置（pages/push） ============ */
@@ -2361,35 +2409,56 @@ Loaders.friends=async function(){
     html+='<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3">'+
       '<div class="flex items-center gap-3"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface">好友操作日志</h2>'+
       '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest">增删改台账</span></div>'+
-      '<span class="text-body-sm font-body-sm text-outline hidden md:block">panel/data/friend_add.jsonl</span></div>';
+      /* [v16.9] 右上角原本直接显示服务器文件路径 panel/data/friend_add.jsonl ——
+         对用面板的人没有任何意义（他们不关心日志落在哪个文件），白占标题栏宽度。
+         改成「共 N 条」计数，并补一个筛选（失败/拒绝优先排查）与搜索。 */
+      (()=>{const _t=String(App.state._flTab||'全部');
+        return '<div class="drBar" style="justify-content:flex-end">'+
+        '<input id="flSearch" class="drSel" style="width:180px;max-width:none" placeholder="搜索对象或说明…" data-input="_flSearch" value="'+esc(App.state._flQ||'')+'">'+
+        [['全部','全部'],['失败','仅失败']].map(x=>'<button class="drBtn'+( _t===x[0]?' drBtn--pri':'')+'" data-click="_flTab" data-arg="'+esc(x[0])+'">'+esc(x[1])+'</button>').join('')+
+        '<span class="drLb">共 '+fl.logs.length+' 条</span></div>';})()+'</div>';
+    const _q=String(App.state._flQ||'').trim().toLowerCase();
+    const _onlyBad=App.state._flTab==='失败';
+    const _rows=fl.logs.filter(g=>{
+      if(_onlyBad&&!(g.result==='error'||g.stage==='rejected'||g.stage==='error'||g.stage==='duplicate'))return false;
+      if(!_q)return true;
+      return ((g.nickname||'')+' '+(g.remark||'')+' '+(g.input||'')+' '+(g.error||'')+' '+(g.stage||'')).toLowerCase().indexOf(_q)>=0;
+    });
     if(!fl.logs.length)html+='<div class="py-12 text-center text-body-sm text-outline">暂无操作记录，添加 / 删除 / 停用 / 改备注后此处会实时留痕</div>';
+    else if(!_rows.length)html+='<div class="py-12 text-center text-body-sm text-outline">没有符合条件的记录</div>';
     else{
       html+='<div class="overflow-x-auto custom-scroll" style="max-height:320px;overflow-y:auto"><table class="w-full border-collapse text-left flog-wrap">'+
         '<thead><tr class="border-b border-surface-container-high/80 bg-surface-container-lowest/60 text-outline text-[11px]">'+
-        '<th class="py-2.5 px-5 font-semibold">时间</th><th class="py-2.5 px-4 font-semibold">对象</th><th class="py-2.5 px-4 font-semibold">结果</th><th class="py-2.5 px-5 font-semibold">说明</th></tr></thead><tbody class="divide-y divide-surface-container-high/50">';
-      fl.logs.forEach(g=>{
+        /* 「结果」列原本整列都是绿色「成功」，和「说明」列内容大量重复（如「成功」+「添加成功 · 已保存…」）。
+           现在只保留**异常**徽章：正常的一律留空，只让真正需要注意的行跳出来。 */
+        '<th class="py-2.5 px-5 font-semibold">时间</th><th class="py-2.5 px-4 font-semibold">对象</th><th class="py-2.5 px-4 font-semibold">说明</th><th class="py-2.5 px-5 font-semibold text-right">结果</th></tr></thead><tbody class="divide-y divide-surface-container-high/50">';
+      _rows.forEach(g=>{
         const st=g.stage||'',act=g.action||'';
-        let bCls,bTxt;
+        /* [v16.9] 正常行不再挂「成功」徽章（整列都是绿色、零信息量，且和「说明」列重复）。
+           只给真正需要注意的行发徽章：失败=红、拒绝/重复=灰、开始=橙、正常=留空。 */
+        let bCls='',bTxt='';
         if(st==='start'){bCls='text-primary-container bg-primary-container/10 border-primary-container/30';bTxt='开始';}
-        else if(g.result==='ok'){bCls='text-tertiary bg-tertiary-container/15 border-tertiary-container/30';bTxt='成功';}
-        else if(g.result==='rejected'){bCls='text-outline bg-surface-container border-surface-container-high';bTxt='拒绝';}
-        else{bCls='text-error bg-error-container/25 border-error/30';bTxt='失败';}
+        else if(st==='error'||g.result==='error'){bCls='text-error bg-error-container/25 border-error/30';bTxt='失败';}
+        else if(g.result==='rejected'||st==='rejected'||st==='duplicate'){bCls='text-outline bg-surface-container border-surface-container-high';bTxt=st==='duplicate'?'已存在':'被拒';}
+        else if(g.env_sync===false){bCls='text-error bg-error-container/25 border-error/30';bTxt='同步失败';}
         let desc='';
         if(st==='start')desc='开始解析（先查聊天列表，兜底走搜索）';
         else if(st==='chatlist_hit')desc='添加 · 聊天列表命中 · '+esc(g.nickname||'');
         else if(st==='search_hit')desc='添加 · 搜索页命中 · '+esc(g.nickname||'');
-        else if(st==='saved')desc='添加成功 · 已保存并同步 .env'+(g.env_sync===false?' · <span class="text-error">.env 同步失败</span>':'');
+        else if(st==='saved')desc='添加成功 · 已保存并同步 .env';
         else if(st==='duplicate')desc='添加被拒 · '+esc(g.error||'已在名单中');
         else if(st==='rejected')desc='添加被拒 · '+esc(g.error||'被拒绝');
-        else if(st==='deleted')desc='删除 · '+esc(g.nickname||g.input||'')+(g.env_sync===false?' · <span class="text-error">.env 同步失败</span>':'');
+        else if(st==='deleted')desc='删除 · '+esc(g.nickname||g.input||'');
         else if(st==='updated'&&act==='update_friend')desc='修改 · '+esc(g.nickname||g.input||'')+' · '+esc(g.field==='status'?(g.new==='paused'?'停用':'恢复'):'备注')+(g.field==='remark'?' · 「'+esc(g.old||'')+'」→「'+esc(g.new||'')+'」':'');
         else if(st==='error')desc=esc(g.error||'操作失败');
         else desc=esc(g.error||st||'');
+        /* 时间：默认只给「多久之前」的短串（今天 HH:MM / 今年 MM-DD），完整时间留在 title */
+        const _w=_ctWhen(g.ts);
         html+='<tr class="hover:bg-surface-container/50 transition-colors">'+
-          '<td class="lg-t py-2.5 px-5 font-mono text-mono-code-sm text-outline whitespace-nowrap">'+esc(g.ts)+'</td>'+
+          '<td class="lg-t py-2.5 px-5 font-mono text-mono-code-sm text-outline whitespace-nowrap" title="'+esc(_w.full)+'">'+esc(_w.short)+'</td>'+
           '<td class="lg-o py-2.5 px-4 font-mono text-mono-code-sm text-on-surface">'+esc(g.nickname||g.remark||dispTarget(g.input))+'</td>'+
-          '<td class="lg-r py-2.5 px-4"><span class="inline-flex items-center px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase '+bCls+'">'+bTxt+'</span></td>'+
-          '<td class="lg-d py-2.5 px-5 text-body-md font-body-md text-on-surface-variant">'+desc+'</td></tr>';
+          '<td class="lg-d py-2.5 px-4 text-body-md font-body-md text-on-surface-variant">'+desc+'</td>'+
+          '<td class="lg-r py-2.5 px-5 text-right">'+(bTxt?('<span class="inline-flex items-center px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase '+bCls+'">'+bTxt+'</span>'):'')+'</td></tr>';
       });
       html+='</tbody></table></div>';
     }
@@ -2420,6 +2489,21 @@ function _fvRows(){
     if(q&&(c.dataset.q||'').indexOf(q)<0)return false;
     return true;
   });
+}
+/* ---- 好友操作日志的搜索 / 筛选（v16.9）：与好友表一样「不重渲染、不丢焦点」 ---- */
+function _flRepaint(){
+  /* 日志段由 Loaders.friends 整体渲染，这里只重跑那一页以应用筛选 */
+  try{Loaders.friends(true);}catch(e){}
+}
+function _flSearch(val){
+  App.state._flQ=String(val==null?'':val);
+  _flRepaint();
+  var i=document.getElementById('flSearch');
+  if(i){try{i.focus();i.setSelectionRange(i.value.length,i.value.length);}catch(e){}}
+}
+function _flTab(tab){
+  App.state._flTab=(tab==='失败')?'失败':'全部';
+  _flRepaint();
 }
 function _fvApply(){
   var b=document.getElementById('fvBody');if(!b)return;

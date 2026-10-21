@@ -2014,3 +2014,35 @@ html.msopen,html.msopen body{overflow:hidden!important}
    标记由 app_v4.js 开头打（window.AndroidApp 桥），浏览器里零影响。 */
 .is-app #lgWxEntry{display:none!important}
 .is-app #lgWxPanel{display:none!important}
+
+/* ── [v16.9] 抓取联系人页 / 好友操作日志 的 UI 收拾 ────────────────────
+   ① 「抓取联系人」页改成与好友页那套 .crow 紧凑表格同构后，手机端原有的
+      「两列卡片网格」媒体查询直接就能生效（它认的是 .contacts-wrap/.crow，
+      而旧的大卡片版本根本吃不到这套规则 —— 这次算是把两处对齐了）。
+   ② 搜索框固定宽度，别被 .drBar 的 flex 压扁。 */
+.ctSearch{flex:0 0 auto}
+/* 手机端：搜索框占满一行，两个筛选/计数换行排开 */
+@media(max-width:767px){
+  .ctSearch{width:100%!important;flex:1 1 100%}
+  .drBar>.drBtn{flex:0 0 auto}
+}
+/* 日志表：时间列窄、说明列自适应；手机上「对象+说明+结果」折成一张卡 */
+.flog-wrap{min-width:0}
+.flog-wrap td.lg-t{width:96px}
+.flog-wrap td.lg-d{max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.flog-wrap td.lg-r{width:92px}
+.flog-wrap td.lg-o{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+@media(max-width:767px){
+  .flog-wrap{overflow:visible!important}
+  .flog-wrap table{display:block!important;width:100%!important;min-width:0!important}
+  .flog-wrap thead{display:none!important}
+  .flog-wrap tbody{display:block!important;width:100%}
+  .flog-wrap tr{display:grid;grid-template-columns:1fr auto;column-gap:10px;row-gap:3px;
+    border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin:0 0 9px!important;box-sizing:border-box}
+  .flog-wrap td{display:block!important;width:auto!important;min-width:0;max-width:none!important;padding:0!important;border:none!important}
+  .flog-wrap td.lg-t{grid-column:1;grid-row:1;width:auto;font-size:11px}
+  .flog-wrap td.lg-r{grid-column:2;grid-row:1;width:auto;text-align:right}
+  .flog-wrap td.lg-o{grid-column:1/-1;grid-row:2;max-width:none!important;font-weight:600;font-size:13px}
+  .flog-wrap td.lg-d{grid-column:1/-1;grid-row:3;max-width:none!important;white-space:normal;
+    font-size:11.5px;color:var(--txt3);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+}
