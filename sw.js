@@ -1,5 +1,5 @@
 // 火花守护 PWA Service Worker
-const CACHE_NAME = 'spark-console-v67';   // v16.9: bump to purge stale static assets (cache-first since v60)
+const CACHE_NAME = 'spark-console-v68';   // v17.0: bump to purge stale static assets (cache-first since v60)
 const CACHE_URLS = [
   '/',
   '/static/console.html',

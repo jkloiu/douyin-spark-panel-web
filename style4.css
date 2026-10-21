@@ -2046,3 +2046,15 @@ html.msopen,html.msopen body{overflow:hidden!important}
   .flog-wrap td.lg-d{grid-column:1/-1;grid-row:3;max-width:none!important;white-space:normal;
     font-size:11.5px;color:var(--txt3);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 }
+
+/* ===== [v17.0 20261021] 火花状态识别：已断·重燃中 / 待抓取 =====
+   背景：抖音会话列表的火花徽章有三种形态，以前只认「纯数字天数」——
+     · 连续中     .commonStreaknormalText 是「737」
+     · 已断·重燃中 文案是「重燃中 1/3」（前一个数是已完成天数，后一个是总天数窗口）
+     · 无火花     整个 .commonStreakstreakContainer 不存在
+   后两种以前都落成 days=null，被当成「没抓到」→ 界面上永远显示不出「无火花」，
+   更算不出「还剩几天彻底消失」。现在后端落 spark_state，这两种各给一档颜色：
+     b-no  = 无火花（红）      b-rev = 已断·重燃中（橙，带「剩 N 天」倒计时） */
+.b-rev{background:rgba(255,122,69,.14);color:#ffb59a;border-color:rgba(255,122,69,.38)}
+.fcar-revive{border-color:rgba(255,122,69,.42);
+  background:linear-gradient(180deg,rgba(255,122,69,.07),transparent 62%)}

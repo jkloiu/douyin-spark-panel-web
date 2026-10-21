@@ -1324,19 +1324,40 @@ function _hashArg(){var h=(location.hash||'').slice(1);var i=h.indexOf(':');retu
    （后者是一套 6 档「待抓取/已断火/危险/注意/正常/稳固/里程碑」，阈值 1/31/101/301/1001，
    和另外两套完全不同）→ 会出现「概览说危险 3 人、火花页说需关注 3 人、详情说危险 2 人」。
    现在三处统一调用下面这两个函数，改口径只需要改这一处。
+
+   [v17.0 修复20261021] 抖音有两种状态以前**根本识别不出来**，因为后端只抓到
+   spark_days 一个数字：
+     · 从来没有火花的好友：那一行没有徽章 → days=null → 被当成「待抓取」，
+       界面永远显示不出「无火花」；
+     · 火花断了在重燃：徽章文案是「重燃中 1/3」→ parseInt 得 NaN → 也是 null，
+       更算不出「还剩几天彻底消失」。
+   现在后端会额外给 spark_state(live/revive/none/unknown) + revive_done/total/left，
+   这里优先按 state 判，state 缺失（老缓存）才退回按天数判。
    ══════════════════════════════════════════════════════════════════════ */
-function sparkLevel(days){
-  if(days==null||days===''||isNaN(Number(days)))return{k:'none',t:'无火花',c:'b-no'};
+function sparkLevel(days, f){
+  const st=f&&f.spark_state?String(f.spark_state):'';
+  if(st==='revive'){
+    /* 已断、正在重燃：抖音给 3 天窗口，第 1 天就是「重燃中 1/3」；
+       还剩 (总-已完成) 天不互动就彻底消失 —— 这是最急的一档，单独一档颜色。 */
+    const dn=(f&&f.revive_done!=null)?Number(f.revive_done):null;
+    const tt=(f&&f.revive_total!=null)?Number(f.revive_total):null;
+    const lf=(f&&f.revive_left!=null)?Number(f.revive_left):(dn!=null&&tt!=null?Math.max(0,tt-dn):null);
+    const core=(dn!=null&&tt!=null)?('重燃 '+dn+'/'+tt):'重燃中';
+    return{k:'revive',t:core+(lf!=null?(' · 剩'+lf+'天'):''),c:'b-rev'};
+  }
+  if(st==='none')return{k:'none',t:'无火花',c:'b-no'};
+  if(st==='unknown')return{k:'none',t:'待抓取',c:'b-wait'};
+  if(days==null||days===''||isNaN(Number(days)))return{k:'none',t:'待抓取',c:'b-wait'};
   const d=Number(days);
   if(d<=0)return{k:'none',t:'无火花',c:'b-no'};
   if(d<=1)return{k:'broken',t:d+' 天 · 已断',c:'b-no'};
   if(d<7)return{k:'warn',t:d+' 天',c:'b-wait'};
   return{k:'ok',t:d+' 天',c:'b-ok'};
 }
-/* 「需关注」档 = 无火花 + 已断（概览的「危险」与火花页的「需关注」是同一个集合） */
-function sparkRiskKey(days){
-  const k=sparkLevel(days).k;
-  return (k==='none'||k==='broken')?'risk':k;
+/* 「需关注」档 = 无火花 + 已断 + 已断·重燃中（待抓取也算，因为它需要人工确认） */
+function sparkRiskKey(days, f){
+  const k=sparkLevel(days,f).k;
+  return (k==='none'||k==='broken'||k==='revive')?'risk':k;
 }
 function _ctSid(c){return String((c&&(c.short_id||c.unique_id||c.douyin_id))||'');}
 function _ctName(c){return (c&&(c.title||c.nickname||c.douyin_nickname))||'未知';}
@@ -1895,7 +1916,15 @@ function _fdRender(){
   var el=ensureView('frienddetail');
   var f=App.state._fdFriend||{};
   var has=f.spark_days!=null;
-  var lv=sparkLevel(f.spark_days);   /* [v13.1] 与列表/概览同一套口径 */
+  var lv=sparkLevel(f.spark_days,f);   /* [v13.1] 与列表/概览同一套口径；[v17.0] 带 state */
+  /* [v17.0] 已断·重燃中 / 无火花 / 待抓取 时，那个大数字没有意义 —— 换成文字，
+     否则会显示「0 天火花」或「— 天火花」，看不出到底断没断。 */
+  var bigTxt=has?String(Number(f.spark_days)):'—', bigUnit='天火花';
+  if(lv.k==='revive'){
+    bigTxt=(f.revive_done!=null&&f.revive_total!=null)?(f.revive_done+'/'+f.revive_total):'重燃中';
+    bigUnit=(f.revive_left!=null)?('重燃中 · 还剩 '+f.revive_left+' 天窗口'):'重燃中';
+  }else if(lv.k==='none'&&String(f.spark_state||'')==='none'){bigTxt='无';bigUnit='火花（从未点亮）';}
+  else if(!has){bigTxt='—';bigUnit='待抓取';}
   var did=f.douyin_id||f.unique_id||'';
   var accts=(f.account_uids||[]).join('、')||'—';
   var nm=friendName(f);
@@ -1905,8 +1934,8 @@ function _fdRender(){
      '<div style="display:inline-block;margin-bottom:10px">'+avatarHtml(f.avatar,nm)+'</div>'+
      '<div class="t" style="font-size:16px">'+esc(nm)+'</div>'+
      '<div class="s mono" style="margin-top:2px">'+esc(did||'（无抖音号）')+'</div>'+
-     '<div style="margin:12px 0 6px"><span style="font-size:30px;font-weight:800;color:#ff7a45">'+(has?Number(f.spark_days):'—')+'</span>'+
-       '<span class="tiny muted" style="margin-left:4px">天火花</span></div>'+
+     '<div style="margin:12px 0 6px"><span style="font-size:30px;font-weight:800;color:#ff7a45">'+esc(bigTxt)+'</span>'+
+       '<span class="tiny muted" style="margin-left:4px">'+esc(bigUnit)+'</span></div>'+
      '<div class="toolbar" style="justify-content:center;gap:6px;flex-wrap:wrap">'+
        '<span class="badge '+lv.c+'">'+lv.t+'</span>'+
        '<span class="badge '+(f.today_sent?'b-ok':'b-gray')+'">'+(f.today_sent?'今日已发':'今日未发')+'</span>'+
@@ -2041,7 +2070,7 @@ Loaders.overview=async function(){
     const minDays=withDays.length?Math.min.apply(null,withDays.map(f=>f.spark_days)):0;
     let _nOk=0,_nWarn=0,_nDanger=0,_nStale=0,_nSent=0,_nPend=0;
     o.friends.forEach(f=>{
-      const k=sparkRiskKey(f.spark_days);   /* 与火花页/详情页同一套口径 */
+      const k=sparkRiskKey(f.spark_days,f);   /* 与火花页/详情页同一套口径 */
       if(k==='ok')_nOk++;else if(k==='warn')_nWarn++;else _nDanger++;
       if(!f.fresh)_nStale++;
       if(f.today_sent)_nSent++;else _nPend++;
@@ -2099,10 +2128,18 @@ Loaders.overview=async function(){
     html+='</section>';
 
     /* ---------- 3) 好友火花（表头对齐小程序；行样式保留网页端） ---------- */
-    const _hot=withDays.slice().sort((a,b)=>b.spark_days-a.spark_days);
     /* 火花里程碑文案 */
     const MILE=[30,100,200,300,520,666,888,1000,1314,1666,2000,3000];
-    const lvOf=d=>{const v=Number(d);
+    const lvOf=(d,f)=>{const v=Number(d);
+      /* [v17.0] 已断·重燃中 / 无火花 时讲「距里程碑还剩几天」毫无意义，
+         直接说清楚现在的状态（重燃中 x/y、还剩几天彻底消失）。 */
+      const _st=(f&&f.spark_state)?String(f.spark_state):'';
+      if(_st==='revive'){
+        const lf=(f.revive_left!=null)?Number(f.revive_left):null;
+        const core=(f.revive_done!=null&&f.revive_total!=null)?('重燃 '+f.revive_done+'/'+f.revive_total):'重燃中';
+        return{t:core+(lf!=null?(' · 剩 '+lf+' 天'):''),c:'text-error'};
+      }
+      if(_st==='none')return{t:'无火花',c:'text-error'};
       if(d==null||isNaN(v))return{t:'待抓取',c:'text-outline'};
       if(v<1)return{t:'已断火',c:'text-error'};
       const nx=MILE.find(m=>m>v);
@@ -2136,14 +2173,27 @@ Loaders.overview=async function(){
       '<a href="#friends" class="shrink-0 inline-flex items-center gap-1 text-body-sm font-body-sm text-primary-container hover:underline">查看全部 '+MI('chevron_right','text-[16px]')+'</a></div>';
     html+='<div id="ovSparkList" class="divide-y divide-surface-container-high/50 overflow-y-auto custom-scroll">';
     if(!o.friends.length)html+='<div class="py-12 text-center text-body-sm font-body-sm text-outline">还没有好友数据</div>';
-    _hot.concat(o.friends.filter(f=>f.spark_days==null)).forEach(f=>{
+    /* [v17.0] 以前是「有天数的一批 + days==null 的一批」拼起来，各排各的。
+       现在 revive/none 也有 days=0，会同时落进两批 → 重复渲染。改成整体按风险排一次：
+       重燃中(有截止日) → 无火花 → 未抓到 → 天数少的。 */
+    const _ovRank=f=>{
+      const st=String((f&&f.spark_state)||'');
+      if(st==='revive')return -3;
+      if(st==='none')return -2;
+      if(f.spark_days==null)return -1;
+      return Number(f.spark_days)||0;
+    };
+    o.friends.slice().sort((a,b)=>_ovRank(a)-_ovRank(b)).forEach(f=>{
       const n=Number(f.spark_days)||0;
       const paused=f.status==='paused';
-      const risk=!f.fresh||f.spark_days==null;
+      const _st=String(f.spark_state||'');
+      const risk=!f.fresh||f.spark_days==null||_st==='revive'||_st==='none';
       const s=paused?{k:'paused',t:'已停用'}:f.today_sent?{k:'sent',t:'已续火'}:risk?{k:'risk',t:'有风险'}:{k:'pending',t:'待续'};
       const sc=statusCls(s.k);
       const pct=f.spark_days==null?0:Math.max(2,Math.round(n/_maxN*100));
-      const lv=lvOf(f.spark_days);
+      const lv=lvOf(f.spark_days,f);
+      /* [v17.0] 重燃中的「天数」是 0，直接打 0 会让人以为抓错了 —— 显示「重燃」 */
+      const _num=(lv&&/重燃/.test(lv.t))?'重燃':(f.spark_days==null?'—':String(n));
       html+='<div class="ov-rk flex items-center gap-3 px-5 py-3.5 hover:bg-surface-container/50 transition-colors group">'+
         '<div class="shrink-0 rounded-full overflow-hidden '+(risk||paused?'ring-1 ring-primary-container/40':'')+'">'+avatarHtml(f.avatar,friendName(f))+'</div>'+
         /* 副行 = 抖音号：总览接口的 friend 只给 short_id（数字抖音号），三级兜底后再兜 short_id */
@@ -2153,14 +2203,14 @@ Loaders.overview=async function(){
         '</div>'+
         '<div class="shrink-0 text-center">'+
           '<div class="inline-flex items-center gap-1">'+MI('local_fire_department','text-[18px] '+(risk?'text-error':'text-primary-container'),1)+
-            '<span class="text-mono-metric-md font-mono-metric-md '+(risk?'text-error':'text-on-surface')+' font-bold">'+(f.spark_days==null?'—':n)+'</span>'+
-            '<span class="text-body-sm font-body-sm text-outline">天</span></div>'+
+            '<span class="text-mono-metric-md font-mono-metric-md '+(risk?'text-error':'text-on-surface')+' font-bold">'+esc(_num)+'</span>'+
+            '<span class="text-body-sm font-body-sm text-outline">'+(_num==='重燃'?'':(f.spark_days==null?'':'天'))+'</span></div>'+
           '<div class="text-[10px] font-mono-code-sm '+(f.fresh?'text-tertiary':'text-[#f59e0b]')+' mt-0.5">'+(f.fresh?'数据新鲜':'缓存过期')+'</div>'+
         '</div>'+
         '<div class="ov-rk-mile flex-1 min-w-0 flex flex-col gap-1.5 max-w-[240px]">'+
           '<div class="flex items-center justify-between text-body-sm gap-2">'+
             '<span class="ov-rk-mt '+lv.c+' font-medium text-[11px] truncate min-w-0" title="'+esc(lv.t)+'">'+esc(lv.t)+'</span>'+
-            '<span class="text-mono-code-sm text-outline text-[11px] shrink-0">'+(f.spark_days==null?'—':n)+'/'+_maxN+'天</span></div>'+
+            '<span class="text-mono-code-sm text-outline text-[11px] shrink-0">'+(f.spark_days==null||_num==='重燃'?'—':n)+'/'+_maxN+'天</span></div>'+
           '<div class="milebar w-full h-1.5 bg-surface-container rounded-full overflow-hidden"><div class="h-full rounded-full '+barCls(n,risk)+'" style="width:'+pct+'%"></div>'+_mileTicks+'</div>'+
         '</div>'+
         '<span class="ov-rk-st shrink-0 inline-flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-full border text-body-sm font-medium '+sc[0]+'">'+
@@ -2242,7 +2292,7 @@ Loaders.friends=async function(){
     const _spKey=sparkRiskKey;
     const cnt={all:d.friends.length,risk:0,warn:0,ok:0,sent:0};
     let staleN=0;
-    d.friends.forEach(f=>{cnt[_spKey(f.spark_days)]++;if(f.today_sent)cnt.sent++;if(!f.fresh)staleN++;});
+    d.friends.forEach(f=>{cnt[_spKey(f.spark_days,f)]++;if(f.today_sent)cnt.sent++;if(!f.fresh)staleN++;});
     App.state._fvCnt=cnt;/* [v11] 切筛选时顶栏芯片要用同一份计数（不重新请求） */
 
     /* 36px 圆形头像（有图走图，无图首字母兜底） */
@@ -2276,7 +2326,7 @@ Loaders.friends=async function(){
     const _ff=(function(){let v=App.state.friendFilter||'all';
       if(['all','risk','warn','ok'].indexOf(v)<0)v='all';
       App.state.friendFilter=v;return v;})();
-    const list=_ff==='all'?d.friends:d.friends.filter(f=>_spKey(f.spark_days)===_ff);
+    const list=_ff==='all'?d.friends:d.friends.filter(f=>_spKey(f.spark_days,f)===_ff);
     /* [v15] 头部改成一行：左「好友火花 + 共 N 位」，右「排序 + 批量一键续火」。
        去掉了「收起列表」按钮（用户要求）——列表默认展开，不再提供收起。
        排序按钮在手机上是纯图标（.fvSortTxt 文案隐藏，title 里说明），
@@ -2308,8 +2358,9 @@ Loaders.friends=async function(){
     }else{
       list.forEach(f=>{
         const paused=f.status==='paused';
-        const n=(f.spark_days==null)?-1:(Number(f.spark_days)||0);
-        const lv=_spLevel(f.spark_days),k=lv.k;
+        const lv=_spLevel(f.spark_days,f),k=lv.k;
+        /* [v17.0] 排序权重：重燃中(有截止日) 最前 → 待抓取 → 无火花(0 天) → 天数少的 */
+        const n=(k==='revive')?-3:((f.spark_days==null)?-1:(Number(f.spark_days)||0));
         const msg=String(f.last_message||f.last_content||'').replace(/\\n/g,' ').replace(/\s+/g,' ').trim();
         const mt=String(f.last_msg_time||'').trim();
         const q=((friendName(f)||'')+' '+(f.douyin_id||f.unique_id||f.short_id||'')).toLowerCase();
@@ -2317,7 +2368,7 @@ Loaders.friends=async function(){
         html+='<div class="fcar'+(k==='ok'?'':' fcar-'+k)+(paused?' fcar-off':'')+'"'+
           ' data-sid="'+esc(f.short_id||'')+'" data-lv="'+k+'" data-days="'+n+'" data-q="'+esc(q)+'"'+
           ' data-click="Actions.fdOpen" data-args="'+esc(f.short_id||'')+'">'+
-          '<div class="fcarTop">'+AV(f,k==='risk'||paused)+
+          '<div class="fcarTop">'+AV(f,k!=='ok'||paused)+
             '<div class="fcarMid"><div class="fcarName">'+esc(friendName(f))+(paused?'<span class="badge b-gray fcarTag">已停用</span>':'')+'</div>'+
             '<div class="fcarId mono">'+esc(f.douyin_id||f.unique_id||f.short_id||'—')+'</div></div>'+
             '<span class="badge '+lv.c+'">'+esc(lv.t)+'</span></div>'+
@@ -2328,7 +2379,10 @@ Loaders.friends=async function(){
           '</div>'+
           (msg?'<div class="fcarMsg"><span class="fcarMsgT">最后一条：'+esc(msg.slice(0,140))+'</span></div>':'')+
           '<div class="fcarOps">'+
-            (k==='risk'
+            /* [v17.0] 原来写的是 k==='risk'，但 sparkLevel 从来不会返回 'risk'（那是筛选档的键）
+               → 红色「紧急续火」按钮其实一次都没出现过。现在按真正的危险档判：
+               重燃中 / 无火花 / 已断。 */
+            ((['revive','none','broken'].indexOf(k)>=0)
               ?'<button class="btn btn-sm btn-danger" data-click="Actions.openMsgPicker" data-args="custom|'+esc(f.short_id)+'">'+MI('priority_high','text-[15px]')+'紧急续火</button>'
               :'<button class="btn btn-sm btn-primary" data-click="Actions.openMsgPicker" data-args="custom|'+esc(f.short_id)+'">'+MI('bolt','text-[15px]')+'单独续火</button>')+
             ic('chat','发送测试话术','Actions.openMsgPicker','custom|'+esc(f.short_id))+
@@ -4175,7 +4229,8 @@ function _taskPickTarget(){
   var fs=App.state.friends||[];
   var f=fs.find(function(x){return String(x.short_id)===String(sid);});
   if(!f){h.textContent='';return;}
-  var d=(f.spark_days==null)?'无火花数据':(f.spark_days+' 天');
+  var _lv=sparkLevel(f.spark_days,f);
+  var d=(f.spark_days==null)?'待抓取':((_lv.k==='revive')?('已断 · '+_lv.t):(f.spark_days+' 天'));
   var st=f.today_sent?'今日已续':(f.fresh?'待续':'缓存过期');
   h.innerHTML=MI('local_fire_department','text-[14px] text-primary-container align-middle')+' 当前 <b class="text-on-surface">'+esc(d)+'</b> · '+esc(st)+
     (f.last_msg_time?(' · 最近互动 '+esc(f.last_msg_time)):'');
@@ -4642,9 +4697,12 @@ function drEmptyCard(d){
 function drSparkText(s){
   if(s.no_target)return '<span class="badge b-gray">无目标好友</span>';
   const seg=[];
+  /* [v17.0] 「已断·重燃中」单独一档：它有截止日（还剩几天彻底消失），最急 */
+  if(s.revive)seg.push('<span style="color:var(--red)">重燃中 '+s.revive+' 个</span>');
   if(s.broken)seg.push('<span style="color:var(--red)">已断火花 '+s.broken+' 个</span>');
   if(s.none)seg.push('<span style="color:var(--red)">无火花 '+s.none+' 个</span>');
   if(s.low)seg.push('<span style="color:var(--amber)">告急 '+s.low+' 个</span>');
+  if(s.unknown)seg.push('<span class="tiny muted">未抓到 '+s.unknown+' 个</span>');
   const tail=' <span class="tiny muted">共 '+s.total+' 人'+(s.when?' · 数据 '+esc(s.when):'')+'</span>';
   if(seg.length)return seg.join(' · ')+tail;
   if(s.min_days!=null)return '<span style="color:var(--green)">最少 '+s.min_days+' 天</span>'+tail;
@@ -4652,15 +4710,22 @@ function drSparkText(s){
 }
 function drFriendLine(f){
   const n=esc(f.name||'?');
-  if(f.days==null)return '<div style="color:var(--red)">⛔ '+n+' · 无火花</div>';
+  const st=String(f.spark_state||'');
+  if(st==='revive'){
+    const g=(f.revive_done!=null&&f.revive_total!=null)?(f.revive_done+'/'+f.revive_total):'';
+    return '<div style="color:var(--red)">🕯 '+n+' · 已断 · 重燃中'+esc(g)+
+      (f.revive_left!=null?('（还剩 '+esc(f.revive_left)+' 天彻底消失）'):'')+'</div>';
+  }
+  if(st==='none')return '<div style="color:var(--red)">⛔ '+n+' · 无火花</div>';
+  if(f.days==null)return '<div style="color:var(--txt3,#8b95a7)">❓ '+n+' · 未抓到</div>';
   if(f.days<=DR_BROKEN)return '<div style="color:var(--red)">💔 '+n+' · '+f.days+' 天（已断）</div>';
   if(f.days<DR_LOW)return '<div style="color:var(--amber)">⚠️ '+n+' · '+f.days+' 天</div>';
   return '<div style="color:var(--green)">✅ '+n+' · '+f.days+' 天</div>';
 }
 function drFriends(list){
   if(!list||!list.length)return '';
-  const bad=list.filter(f=>f.days==null||f.days<DR_LOW);
-  const good=list.filter(f=>f.days!=null&&f.days>=DR_LOW);
+  const bad=list.filter(f=>f.days==null||f.spark_state==='revive'||f.spark_state==='none'||f.days<DR_LOW);
+  const good=list.filter(f=>f.days!=null&&f.spark_state!=='revive'&&f.spark_state!=='none'&&f.days>=DR_LOW);
   let h=bad.slice(0,12).map(drFriendLine).join('');
   if(bad.length>12)h+='<div class="tiny muted">…另有 '+(bad.length-12)+' 个需处理好友</div>';
   if(good.length)h+='<details style="margin-top:6px"><summary class="tiny muted" style="cursor:pointer">正常好友 '+good.length+' 个</summary>'+good.map(drFriendLine).join('')+'</details>';
@@ -4832,7 +4897,15 @@ Loaders.daily=async function(){
     /* 好友明细 */
     const allF=[];
     _accsAll.forEach(a=>(a.friends||[]).forEach(f=>allF.push(Object.assign({},f,{acc:a.uname,uid:a.uid}))));
-    allF.sort((x,y)=>{const a=(x.days==null?-1:x.days),b=(y.days==null?-1:y.days);return a-b;});
+    /* [v17.0] 排序权重：重燃中（有截止日）→ 无火花 → 未抓到 → 天数少的 */
+    const _dRank=f=>{
+      const st=String((f&&f.spark_state)||'');
+      if(st==='revive')return -3;
+      if(st==='none')return -2;
+      if(f.days==null)return -1;
+      return Number(f.days)||0;
+    };
+    allF.sort((x,y)=>_dRank(x)-_dRank(y));
     html+='<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] overflow-hidden">'+
       '<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3 flex-wrap">'+
       '<div class="flex items-center gap-3"><h3 class="text-headline-md font-headline-md font-semibold text-on-surface">好友明细</h3>'+
@@ -4846,18 +4919,26 @@ Loaders.daily=async function(){
         '<th class="py-2.5 px-4 font-semibold text-center">状态</th><th class="py-2.5 px-5 font-semibold text-right">所属账号</th></tr></thead>'+
         '<tbody class="divide-y divide-surface-container-high/50 text-body-md font-body-md">';
       allF.slice(0,60).forEach(f=>{
-        const bad=f.days==null||f.days<DR_LOW;
-        const broken=f.days!=null&&f.days<=DR_BROKEN;
-        const st=broken?['已断','text-error bg-error-container/25 border-error/40','bg-error pulse-danger']
-          :(f.days==null?['无火花','text-error bg-error-container/25 border-error/40','bg-error pulse-danger']
+        /* [v17.0] 状态优先看 spark_state：重燃中＝已断但有截止日；none＝从来没火花；
+           days=None ＝ 本轮没抓到（不能冒充无火花） */
+        const _st=String(f.spark_state||'');
+        const bad=f.days==null||_st==='revive'||_st==='none'||f.days<DR_LOW;
+        const broken=f.days!=null&&f.days<=DR_BROKEN&&_st!=='revive'&&_st!=='none';
+        const st=_st==='revive'?['重燃中','text-error bg-error-container/25 border-error/40','bg-error pulse-danger']
+          :(_st==='none'?['无火花','text-error bg-error-container/25 border-error/40','bg-error pulse-danger']
+          :(broken?['已断','text-error bg-error-container/25 border-error/40','bg-error pulse-danger']
+          :(f.days==null?['未抓到','text-outline bg-surface-container border-surface-container-high','bg-outline']
           :(f.days<DR_LOW?['告急','text-[#f59e0b] bg-[rgba(245,158,11,.12)] border-[rgba(245,158,11,.35)]','bg-[#f59e0b]']
-          :['正常','text-tertiary bg-tertiary-container/15 border-tertiary-container/30','bg-tertiary']));
+          :['正常','text-tertiary bg-tertiary-container/15 border-tertiary-container/30','bg-tertiary']))));
+        const _num=(_st==='revive')?((f.revive_done!=null&&f.revive_total!=null)?(f.revive_done+'/'+f.revive_total):'重燃')
+          :(f.days==null?'—':f.days);
         html+='<tr class="hover:bg-surface-container/50 transition-colors">'+
-          '<td class="py-2.5 px-5 text-on-surface">'+esc(f.name||'?')+'</td>'+
+          '<td class="py-2.5 px-5 text-on-surface">'+esc(f.name||'?')+
+            (_st==='revive'&&f.revive_left!=null?('<span class="text-body-sm text-outline"> · 还剩 '+esc(f.revive_left)+' 天</span>'):'')+'</td>'+
           '<td class="py-2.5 px-4 text-center"><div class="inline-flex items-center gap-1">'+
             MI('local_fire_department','text-[16px] '+(bad?'text-error':'text-primary-container'),1)+
-            '<span class="text-mono-metric-md font-mono-metric-md '+(bad?'text-error':'text-on-surface')+' font-bold">'+(f.days==null?'—':f.days)+'</span>'+
-            '<span class="text-body-sm font-body-sm text-outline">天</span></div></td>'+
+            '<span class="text-mono-metric-md font-mono-metric-md '+(bad?'text-error':'text-on-surface')+' font-bold">'+esc(_num)+'</span>'+
+            '<span class="text-body-sm font-body-sm text-outline">'+(_st==='revive'?'重燃':'天')+'</span></div></td>'+
           '<td class="py-2.5 px-4 text-center"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase '+st[1]+'">'+
             '<span class="w-1.5 h-1.5 rounded-full '+st[2]+'"></span>'+st[0]+'</span></td>'+
           '<td class="py-2.5 px-5 text-right text-body-sm font-body-sm text-outline">'+esc(f.acc)+'</td></tr>';
