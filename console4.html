@@ -396,11 +396,14 @@
     <div style="margin-bottom:12px">
       <div class="tiny muted" style="margin-bottom:6px">发送话术</div>
       <div style="display:flex;flex-direction:column;gap:6px">
-        <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">
-          <input type="radio" name="etMsgMode" value="template" data-change="Actions.onEditMsgModeChange"> <span id="etMsgModeDefaultText">使用「今日火花 + 每日一言」话术</span>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer">
+          <input type="radio" name="etMsgMode" value="custom" data-change="Actions.onEditMsgModeChange" style="margin-top:2px"> <span>自定义话术（输入你自己的内容）</span>
         </label>
-        <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">
-          <input type="radio" name="etMsgMode" value="custom" data-change="Actions.onEditMsgModeChange"> 自定义话术（输入你自己的内容）
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer">
+          <input type="radio" name="etMsgMode" value="template" checked data-change="Actions.onEditMsgModeChange" style="margin-top:2px"> <span id="etMsgModeDefaultText">每日一言（今日火花 + 每日一言话术）</span>
+        </label>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer">
+          <input type="radio" name="etMsgMode" value="spark" data-change="Actions.onEditMsgModeChange" style="margin-top:2px"> <span>火花表情（只发抖音自带的「续火花」互动表情，不发文字）</span>
         </label>
       </div>
       <textarea id="etMsgInput" class="dark-input" rows="2" style="width:100%;resize:vertical;display:none;margin-top:6px" placeholder="输入要发送的话，例如：睡了吗？[二哈]"></textarea>
@@ -441,6 +444,6 @@
   </div>
 </div>
 
-<script src="/static/app_v4.js?v=21.5"></script>
+<script src="/static/app_v4.js?v=21.6"></script>
 </body>
 </html>

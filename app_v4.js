@@ -3675,11 +3675,15 @@ Actions.onSchedTypeChange=()=>{
   Actions.syncSchedMsgLabel();
 };
 Actions.syncSchedMsgLabel=()=>{
-  /* 批量续/单独续统一两种话术：今日火花+每日一言 / 自定义，标签不再随任务类型变 */
+  /* 批量续/单独续统一三种发送方式：每日一言 / 自定义 / 火花表情，标签不随任务类型变 */
   const opt=document.getElementById('newTaskMsgModeDefault');
-  if(opt)opt.textContent='今日火花 + 每日一言';
+  if(opt)opt.textContent='每日一言（今日火花 + 每日一言）';
+  const mode=document.getElementById('newTaskMsgMode')?.value||'template';
   const hint=document.getElementById('newTaskMsgHint');
-  if(hint){
+  if(!hint)return;
+  if(mode==='spark'){hint.textContent='只发送抖音自带的「续火花」互动表情（聊天里显示为火焰大图），不发送文字。';}
+  else if(mode==='custom'){hint.textContent='填写下方自定义话术；文字发出后会自动补发抖音自带的「续火花」互动表情。';}
+  else{
     const tpl=(App.state.status&&App.state.status.msg_template)||'';
     hint.textContent='发送内容：'+(tpl?tpl.replace(/\n/g,' ⏎ '):'今日火花 + 每日一言')+'（想固定内容就选「自定义话术」）';
   }
@@ -3700,7 +3704,7 @@ Actions.openTaskForm=()=>{
   h+='<div id="targetRow" class="off" style="display:none"><label class="text-body-sm font-body-sm text-outline block mb-1">目标好友</label><select id="newTaskTarget" class="dark-input" style="width:100%"><option value="">加载中...</option></select></div>';
   h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">执行时间</label><div class="flex items-center gap-2"><input type="number" id="newTaskHour" value="0" min="0" max="23" class="dark-input" style="width:72px"> 时 <input type="number" id="newTaskMinute" value="10" min="0" max="59" class="dark-input" style="width:72px"> 分</div></div>';
   h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">随机延迟（分钟）</label><input type="number" id="newTaskDelay" value="0" min="0" max="720" class="dark-input" style="width:110px"></div>';
-  h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">发送话术</label><select id="newTaskMsgMode" class="dark-input" style="width:100%" data-change="Actions.onSchedMsgModeChange"><option id="newTaskMsgModeDefault" value="template">今日火花 + 每日一言</option><option value="custom">自定义话术</option></select>';
+  h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">发送话术</label><select id="newTaskMsgMode" class="dark-input" style="width:100%" data-change="Actions.onSchedMsgModeChange"><option id="newTaskMsgModeDefault" value="template">每日一言（今日火花 + 每日一言）</option><option value="custom">自定义话术</option><option value="spark">火花表情（只发互动表情）</option></select>';
   h+='<div class="text-body-sm text-outline mt-1" id="newTaskMsgHint"></div></div>';
   h+='<div id="newTaskMsgRow" class="off lg:col-span-2" style="display:none"><label class="text-body-sm font-body-sm text-outline block mb-1">自定义话术</label><textarea id="newTaskMsg" class="dark-input" rows="2" style="width:100%;resize:vertical" placeholder="输入要发送的话，例如：睡了吗？[二哈]（留空则用「今日火花 + 每日一言」）"></textarea></div>';
   h+='</div>';
@@ -3730,12 +3734,11 @@ Actions.addSchedTask=async()=>{
   };
   const mMode=document.getElementById('newTaskMsgMode')?.value||'template';
   const mVal=(document.getElementById('newTaskMsg')?.value||'').trim();
-  /* 只要框里有内容就用它 —— 手机端旧样式曾让自定义框在「默认话术」下也显示，
-     用户输入后被静默丢掉，等于「话术没改」。留空则走「今日火花 + 每日一言」。 */
-  body.msg=mVal;
-  body.msg_mode=(mMode==='custom'&&mVal)?'custom':'template';
-  if(mMode==='custom'&&!mVal)toast('未填写自定义话术','将按「今日火花 + 每日一言」发送','err');
-  body.description=(body.type==='main'?'批量续('+body.account_uid+')':'单独续('+body.target+')')+(body.msg?' · 话术:'+body.msg:'');
+  /* 只有自定义档才带文字；每日一言/火花表情档一律不发文字（框里残留内容会被丢弃） */
+  body.msg=(mMode==='custom')?mVal:'';
+  body.msg_mode=mMode==='spark'?'spark':((mMode==='custom'&&mVal)?'custom':'template');
+  if(mMode==='custom'&&!mVal)toast('未填写自定义话术','将按「每日一言」发送','err');
+  body.description=(body.type==='main'?'批量续('+body.account_uid+')':'单独续('+body.target+')')+(body.msg?' · 话术:'+body.msg:(body.msg_mode==='spark'?' · 火花表情':''));
   try{
     const r=await api('/api/schedule/tasks',{method:'POST',body});
     if(r.ok){Actions.closeTaskForm();toast('已添加','定时任务已创建','ok');Loaders.tasks();}
@@ -3786,7 +3789,7 @@ Actions.editSchedTask=async(id)=>{
   const a=accs.find(x=>x.unique_id===t.account_uid);
   document.getElementById('etType').textContent=t.type==='main'?'批量续':'单独续';
   const _etDef=document.getElementById('etMsgModeDefaultText');
-  if(_etDef)_etDef.textContent='使用「今日火花 + 每日一言」话术';
+  if(_etDef)_etDef.textContent='每日一言（今日火花 + 每日一言话术）';
   document.getElementById('etAcc').textContent='抖音号：'+(a?(a.username+' ('+t.account_uid+')'):(t.account_uid||'全部账号'));
   document.getElementById('etHour').value=t.hour||0;
   document.getElementById('etMinute').value=t.minute||0;
@@ -3794,8 +3797,8 @@ Actions.editSchedTask=async(id)=>{
   document.getElementById('etEnabled').checked=t.enabled!==false;
   document.getElementById('etMsg').textContent='';
   const _hasMsg=(t.msg||'').trim();
-  /* 话术模式：template（今日火花+每日一言）/ custom（自定义内容） */
-  const _mode=(t.msg_mode==='custom'||(!t.msg_mode&&_hasMsg))?'custom':'template';
+  /* 话术模式：template（每日一言）/ custom（自定义内容）/ spark（只发互动表情） */
+  const _mode=(t.msg_mode==='spark')?'spark':((t.msg_mode==='custom'||(!t.msg_mode&&_hasMsg))?'custom':'template');
   const _mt=document.querySelector('#editTaskModal input[name=etMsgMode][value='+_mode+']');
   const _mi=document.getElementById('etMsgInput');
   if(_mt)_mt.checked=true;
@@ -3832,8 +3835,9 @@ Actions.submitEditTask=async(btn)=>{
   if(t.type==='custom')body.target=document.getElementById('etTarget').value||'';
   const _em=document.querySelector('#editTaskModal input[name=etMsgMode]:checked');
   const _emv=(document.getElementById('etMsgInput')?.value||'').trim();
-  body.msg=_emv;   /* 框里有内容就用（切到「今日火花+每日一言」时框已被清空） */
-  body.msg_mode=(_em&&_em.value==='custom'&&_emv)?'custom':'template';
+  const _emMode=_em?_em.value:'template';
+  body.msg=(_emMode==='custom')?_emv:'';   /* 非自定义档不发文字（框里残留内容丢弃） */
+  body.msg_mode=_emMode==='spark'?'spark':((_emMode==='custom'&&_emv)?'custom':'template');
   const msg=document.getElementById('etMsg');msg.textContent='保存中…';
   if(btn)btn.disabled=true;
   try{
@@ -5002,6 +5006,7 @@ Object.assign(Actions,{
     /* 行必须同时切 class（手机端 .formtbl tr{display:block!important} 会盖掉行内 display） */
     Actions._toggleFormRow('newTaskMsgRow',mode==='custom');
     if(mode==='custom'&&ta)setTimeout(()=>ta.focus(),30);
+    Actions.syncSchedMsgLabel();
   },
   /* 表单行的显隐：class + 行内一起切，手机端才真的藏得住 */
   _toggleFormRow(id,show){
