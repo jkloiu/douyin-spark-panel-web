@@ -1,5 +1,5 @@
 // 火花守护 PWA Service Worker
-const CACHE_NAME = 'spark-console-v55';
+const CACHE_NAME = 'spark-console-v56';
 const CACHE_URLS = [
   '/',
   '/static/console.html',

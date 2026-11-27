@@ -422,15 +422,18 @@
     <h4><svg class="svgic" viewBox="0 0 24 24" style="width:17px;height:17px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> <span id="msgModalTitle">选择发送的话</span></h4>
     <div class="tiny muted" style="margin:6px 0 12px" id="msgTip"></div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px">
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">
-        <input type="radio" name="msgMode" value="template" checked data-change="Actions.onMsgModeChange"> <span id="msgModeDefaultText">使用「今日火花 + 每日一言」话术</span>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer">
+        <input type="radio" name="msgMode" value="custom" data-change="Actions.onMsgModeChange" style="margin-top:2px"> <span>自定义话术（输入你自己的内容）</span>
       </label>
-      <label style="display:flex;gap:8px;align-items:center;font-size:13px;cursor:pointer">
-        <input type="radio" name="msgMode" value="custom" data-change="Actions.onMsgModeChange"> 自定义话术（输入你自己的内容）
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer">
+        <input type="radio" name="msgMode" value="template" checked data-change="Actions.onMsgModeChange" style="margin-top:2px"> <span id="msgModeDefaultText">每日一言（今日火花 + 每日一言话术）</span>
+      </label>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:13px;cursor:pointer">
+        <input type="radio" name="msgMode" value="spark" data-change="Actions.onMsgModeChange" style="margin-top:2px"> <span>火花表情（只发抖音自带的「续火花」互动表情，不发文字）</span>
       </label>
     </div>
     <textarea id="msgInput" class="dark-input" rows="3" style="width:100%;resize:vertical;display:none" placeholder="输入要发送的话，例如：睡了吗？[二哈]"></textarea>
-    <div class="tiny muted" id="msgHint" style="margin-top:8px">将使用「今日火花 + 每日一言」话术（含随机每日一言），无需填写。也可写抖音表情代码，如 [二哈] [吐舌小狗] [摊手] [晕] [坏笑]。文字发出后会自动补发抖音自带的「续火花」互动表情（聊天里显示为火焰大图）。</div>
+    <div class="tiny muted" id="msgHint" style="margin-top:8px">将使用「今日火花 + 每日一言」话术（含随机每日一言），无需填写。文字发出后会自动补发抖音自带的「续火花」互动表情（聊天里显示为火焰大图）。</div>
     <div class="toolbar" style="justify-content:flex-end;margin-top:16px;gap:8px">
       <button class="btn btn-ghost btn-sm" data-click="Actions.closeMsgModal">取消</button>
       <button class="btn btn-primary btn-sm" data-click="Actions.confirmMsg">确定发送</button>
@@ -438,6 +441,6 @@
   </div>
 </div>
 
-<script src="/static/app_v4.js?v=21.4"></script>
+<script src="/static/app_v4.js?v=21.5"></script>
 </body>
 </html>

@@ -4930,7 +4930,7 @@ Object.assign(Actions,{
   async run(task,target,fromSelect,btn,msg,msgMode){
     if(fromSelect){const sel=document.getElementById('customTarget');if(sel)target=sel.value;}
     const who=target?target:(task==='main'?'名单内全部好友':'全部');
-    const msgNote=msg?('，发送：'+msg):'（使用「今日火花 + 每日一言」话术）';
+    const msgNote=msg?('，发送：'+msg):(msgMode==='spark'?'，只发「续火花」互动表情（不发文字）':'，使用每日一言话术');
     if(!confirm('确认立即执行「'+(task==='main'?'批量续':'单独续')+'」'+msgNote+'？\n这会在后台真实运行脚本'+(task==='main'?'，向 '+who+' 逐个发送火花消息':'，向 '+who+' 发送一条火花消息')+'。'))return;
     const done=_busy(btn);
     try{
@@ -4955,16 +4955,29 @@ Object.assign(Actions,{
     if(!m)return;
     document.getElementById('msgModalTitle').textContent=(task==='main'?'批量续火花':'单独续火花')+' · 选择发送的话';
     document.getElementById('msgTip').textContent=(task==='main'?'将给当前账号名下全部目标好友发送':'将给该好友发送')+((target&&dispTarget(target))?('（'+dispTarget(target)+'）'):'');
-    /* 批量续/单独续统一两种话术：今日火花+每日一言（模板） / 自定义 */
+    /* 批量续/单独续统一三种发送方式：自定义 / 每日一言（模板） / 火花表情（只发互动表情） */
     const def=document.querySelector('#msgModal input[name=msgMode][value=template]');
     if(def)def.checked=true;
-    const defText=document.getElementById('msgModeDefaultText');
-    if(defText)defText.textContent='使用「今日火花 + 每日一言」话术';
     const inp=document.getElementById('msgInput');inp.value='';inp.style.display='none';
-    const hint=document.getElementById('msgHint');
-    if(hint)hint.textContent='将使用「今日火花 + 每日一言」话术（含随机每日一言），无需填写。也可写抖音表情代码，如 [二哈] [吐舌小狗] [摊手] [晕] [坏笑]。文字发出后会自动补发抖音自带的「续火花」互动表情（聊天里显示为火焰大图）。';
+    this._applyMsgMode();
     m.dataset.task=task;m.dataset.target=target||'';
     m.style.display='flex';
+  },
+  _msgModeHints:{
+    custom:'输入你想发的话；也可写抖音表情代码，如 [二哈] [吐舌小狗] [摊手] [晕] [坏笑]。文字发出后会自动补发抖音自带的「续火花」互动表情。',
+    template:'将使用「今日火花 + 每日一言」话术（含随机每日一言），无需填写。文字发出后会自动补发抖音自带的「续火花」互动表情（聊天里显示为火焰大图）。',
+    spark:'只发送抖音自带的「续火花」互动表情（聊天里显示为火焰大图），不发送任何文字。'
+  },
+  _applyMsgMode(){
+    const el=document.querySelector('#msgModal input[name=msgMode]:checked');
+    const mode=el?el.value:'template';
+    const ta=document.getElementById('msgInput');
+    if(ta){
+      if(mode==='custom'){ta.style.display='';setTimeout(()=>ta.focus(),30);}
+      else{ta.style.display='none';ta.value='';}
+    }
+    const hint=document.getElementById('msgHint');
+    if(hint){hint.style.display='';hint.textContent=this._msgModeHints[mode]||this._msgModeHints.template;}
   },
   closeMsgModal(){const m=document.getElementById('msgModal');if(m)m.style.display='none';},
   _toggleMsgTextarea(radioName,textareaId,hintId){
@@ -4977,7 +4990,7 @@ Object.assign(Actions,{
     const hint=document.getElementById(hintId);
     if(hint)hint.style.display=(mode==='custom')?'none':'';
   },
-  onMsgModeChange(){this._toggleMsgTextarea('msgMode','msgInput','msgHint');},
+  onMsgModeChange(){this._applyMsgMode();},
   onEditMsgModeChange(){this._toggleMsgTextarea('etMsgMode','etMsgInput',null);},
   onSchedMsgModeChange(){
     const sel=document.getElementById('newTaskMsgMode');
@@ -5003,6 +5016,7 @@ Object.assign(Actions,{
     const modeEl=document.querySelector('#msgModal input[name=msgMode]:checked');
     const mode=modeEl?modeEl.value:'template';
     const msg=(mode==='custom')?document.getElementById('msgInput').value.trim():'';
+    if(mode==='custom'&&!msg){toast('请先填写自定义话术','也可以改选「每日一言」或「火花表情」','err');return;}
     m.style.display='none';
     await Actions.run(task,target,false,null,msg,mode);
   },
