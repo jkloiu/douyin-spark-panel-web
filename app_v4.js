@@ -4962,7 +4962,7 @@ Object.assign(Actions,{
     if(defText)defText.textContent='使用「今日火花 + 每日一言」话术';
     const inp=document.getElementById('msgInput');inp.value='';inp.style.display='none';
     const hint=document.getElementById('msgHint');
-    if(hint)hint.textContent='将使用「今日火花 + 每日一言」话术（含随机每日一言），无需填写。也可写抖音表情代码，如 [二哈] [吐舌小狗] [摊手] [晕] [坏笑]。';
+    if(hint)hint.textContent='将使用「今日火花 + 每日一言」话术（含随机每日一言），无需填写。也可写抖音表情代码，如 [二哈] [吐舌小狗] [摊手] [晕] [坏笑]。文字发出后会自动补发抖音自带的「续火花」互动表情（聊天里显示为火焰大图）。';
     m.dataset.task=task;m.dataset.target=target||'';
     m.style.display='flex';
   },
