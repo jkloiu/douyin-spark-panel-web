@@ -2213,5 +2213,7 @@ html.msopen,html.msopen body{overflow:hidden!important}
 #pageTools:empty{display:none}
 /* 好友合并大卡：芯片不换行折断（窄屏由外层 flex-wrap 处理整体换行） */
 #friendChips button{white-space:nowrap}
+/* [v21.3] 「好友火花」卡头新增「添加好友」（批量一键续火右侧），≤480px 允许折行防挤出 */
+@media (max-width:480px){.flistHead{flex-wrap:wrap!important}}
 /* 日报卡头：窄屏「立即推送 + 刷新」仍压在一行，标题过长才允许换行 */
 @media (max-width:480px){.drHeadTop{flex-wrap:wrap}}

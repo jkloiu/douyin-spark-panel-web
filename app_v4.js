@@ -2283,13 +2283,11 @@ Loaders.friends=async function(){
       (unit?'<span class="statUnit">'+unit+'</span>':'')+'</div>'+
       '<div class="statLbl text-body-sm font-body-sm text-outline mt-0.5">'+label+'</div></div>';
     let html='<section class="statCard">';
-    /* [v21] 用户要求：添加好友 + 3 格 KPI + 4 档筛选合并成**一个大框**。
-       卡头左侧标题与总数，右侧「添加好友」；下面三格 KPI；最下面一行筛选芯片
-       （桌面/手机同一处渲染，#friendChips 由 _hdrFriends() 填充与刷新）。 */
+    /* [v21.3] 用户要求：4 档筛选并到下方「好友火花」卡；「添加好友」挪到「批量一键续火」右侧。
+       本卡只留标题 + 总数 + 三格 KPI。 */
     html+='<div class="flex items-center justify-between gap-3 flex-wrap" style="padding:14px 18px 0">'+
       '<div class="flex items-center gap-2 min-w-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface whitespace-nowrap">好友与火花</h2>'+
       '<span class="tag">共 '+d.friends.length+' 位</span></div>'+
-      '<button class="h-8.5 px-3.5 bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-body-sm font-semibold rounded-lg flex items-center gap-1.5 shadow-sm active:scale-95 transition-all" data-click="Actions.openFriendAdd">'+MI('person_add','text-[17px]',1)+'<span>添加好友</span></button>'+
     '</div>';
     html+='<div class="statGrid">';
     html+=_cell(d.friends.length,'位','守护好友总数');
@@ -2300,7 +2298,6 @@ Loaders.friends=async function(){
        [v16.1] 原「火花数据 · 立即抓取」独立行撤掉：抓取按钮已挪到下面
        「好友火花」卡头部，和「批量一键续火」同一行。#sparkTip / #sparkGrabBtn
        两个 id 都保留，_sparkUi() 的局部刷新逻辑不变。 */
-    html+='<div style="padding:0 18px 14px"><div id="friendChips" class="inline-flex flex-wrap items-center gap-0.5 bg-surface-container-lowest p-1 rounded-lg border border-surface-container-high text-body-sm font-body-sm"></div></div>';
     html+='</section>';
 
     /* ---------- 3) 好友火花（卡片形态，对齐小程序 spark 页；
@@ -2329,8 +2326,11 @@ Loaders.friends=async function(){
           '<span class="gbTxt gbShort">'+(_sBusy?((App.state._sparkSec||0)+'s'):'抓取')+'</span>'+
         '</button>'+
         '<button class="btn btn-primary btn-sm" data-click="Actions.openMsgPicker" data-args="main|null">'+MI('bolt','text-[15px]',1)+'批量一键续火</button>'+
+        '<button class="btn btn-primary btn-sm" data-click="Actions.openFriendAdd">'+MI('person_add','text-[15px]',1)+
+          '<span class="gbTxt gbFull">添加好友</span><span class="gbTxt gbShort">添加</span></button>'+
       '</div></div>';
-    /* 4 档筛选：[v21] 已并入上方「好友与火花」大卡（#friendChips），这里不再单独渲染 */
+    /* [v21.3] 4 档筛选从上方统计卡并入本卡：列表的筛选跟列表放一起（#friendChips 由 _hdrFriends() 填充） */
+    html+='<div class="fvChips" style="padding-bottom:10px"><div id="friendChips" class="inline-flex flex-wrap items-center gap-0.5 bg-surface-container-lowest p-1 rounded-lg border border-surface-container-high text-body-sm font-body-sm"></div></div>';
     if(staleN)html+='<div class="stalebar">⏰ 有 '+staleN+' 位好友的火花数据不是今天的（抓取可能没覆盖到）</div>';
     html+='<div id="fvWrap">';
     html+='<div id="fvBody" class="fcardList">';
@@ -2382,7 +2382,7 @@ Loaders.friends=async function(){
     html+='</section>';
 
     /* [v20] 原「添加好友功能条 + 抓取到的联系人」已整体移入 #frAddModal 弹窗，
-       入口是正文顶部工具条的「添加好友」按钮（Actions.openFriendAdd）。 */
+       [v21.3] 入口是「好友火花」卡头「批量一键续火」右侧的「添加好友」（Actions.openFriendAdd）。 */
 
     /* ---------- 6) 好友操作日志 ---------- */
     html+='<section class="narrowSec bg-surface-container-low border border-surface-container-high rounded-[14px] overflow-hidden">';
