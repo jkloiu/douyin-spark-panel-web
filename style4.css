@@ -375,6 +375,12 @@ td .cell .toolbar{margin-left:auto}
   #schedTable td[data-label="下次"]{white-space:nowrap}
   #schedTable td[data-label="话术"]{max-width:180px}
 }
+/* [v17.2] 上面那组规则只认 v1 的 data-label，v4 的表格没有这个属性 → 一条都没命中，
+   「类型 / 目标 / 状态 / 操作」四列被挤成竖排单字（实测每行 99px 高，整张表像被碾过）。
+   这里按 id 兜底：整张表不折字，列的内边距也收窄一点，把横向增长压到最小；
+   真放不下时容器本来就是 overflow-x-auto，横向滚动而不是压字。 */
+#schedTable th,#schedTable td{white-space:nowrap}
+#schedTable th,#schedTable td{padding-left:12px;padding-right:12px}
 
 /* ============================ 响应式 ============================ */
 @media(max-width:1080px){
@@ -1694,26 +1700,10 @@ html.msopen,html.msopen body{overflow:hidden!important}
 /* 联系人表：「最后一条」给个宽度提示，别被名称/抖音号把宽度吃光 */
 .contacts-wrap td.cpv{max-width:none;width:36%}
 
-/* ── 好友操作日志：手机端表格 → 卡片（原来 600px 宽的表在 390px 屏上要左右滑） ── */
-@media (max-width:767px){
-  .flog-wrap{overflow:visible!important;max-height:none!important;min-width:0!important}
-  .flog-wrap table{display:block!important;width:100%!important;min-width:0!important}
-  .flog-wrap thead{display:none!important}
-  .flog-wrap tbody{display:grid;grid-template-columns:1fr;gap:10px;width:100%}
-  /* [v16] 用户要求：好友 + 日志同一行，日期 + 状态同一行
-     （原布局是 时间 / 对象+结果 / 说明 三行）。 */
-  .flog-wrap tr{display:grid!important;grid-template-columns:minmax(0,auto) minmax(0,1fr);
-    grid-template-areas:"obj dsc" "tm res";gap:3px 8px;
-    padding:11px 13px;margin:0!important;box-sizing:border-box;
-    border:1px solid var(--line)!important;border-radius:12px;background:var(--panel)}
-  .flog-wrap td{display:block!important;width:auto!important;min-width:0;padding:0!important;border:none!important}
-  .flog-wrap td.lg-o{grid-area:obj;align-self:center;font-size:12.5px;font-weight:600;color:#dee2f1;
-    max-width:38vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .flog-wrap td.lg-d{grid-area:dsc;font-size:12px;line-height:1.55;color:var(--txt2);
-    word-break:break-word}
-  .flog-wrap td.lg-t{grid-area:tm;font-size:11px;color:var(--txt3);letter-spacing:.02em}
-  .flog-wrap td.lg-r{grid-area:res;justify-self:end;align-self:center}
-}
+/* ── 好友操作日志：手机端表格 → 卡片 ──
+   [v17.2] 这段 v16 的 grid-template-areas 布局已被后面「日志表」那段取代
+   （同样在 max-width:767px 内、且位置更靠后，属重复定义）。为避免两套规则互相打架，
+   这里整体删除，只留说明；现役布局见 `.flog-wrap` 那一节（两行卡片）。 */
 
 /* ── [v16] 移动端隐藏工具类（任务页「当前 crontab」用它只保留桌面端） ── */
 @media (max-width:767px){
@@ -2021,30 +2011,74 @@ html.msopen,html.msopen body{overflow:hidden!important}
       而旧的大卡片版本根本吃不到这套规则 —— 这次算是把两处对齐了）。
    ② 搜索框固定宽度，别被 .drBar 的 flex 压扁。 */
 .ctSearch{flex:0 0 auto}
+/* [v17.2] 好友操作日志的筛选栏：搜索 / 全部 / 仅失败 必须同一行。
+   .drBar 默认 flex-wrap，390px 手机上搜索框一占位，右边两个按钮就被挤到下一行。
+   这里不换行 + 搜索框可压缩（min 110px），按钮固定宽度 → 320px 屏也放得下。
+   [v17.3] 补一个反向约束：桌面端搜索框**不能**长成整行（上一版 flex:1 1 110px 把它拉满了，
+   把「全部/仅失败/共 N 条」推到最右边，整行像断了）。桌面固定 190px，手机才允许撑满剩余宽度。 */
+.flogHead{flex-wrap:wrap}
+.flogHead .flogBar{width:100%}
+.flogBar{flex-wrap:nowrap}
+.flogBar>.drBtn{flex:0 0 auto}
+.flogBar>.drSel{flex:0 1 190px;min-width:110px}
+@media(min-width:768px){
+  .flogHead{flex-wrap:nowrap;align-items:center}
+  .flogHead .flogBar{width:auto;margin-left:auto}
+}
+@media(max-width:767px){
+  .flogBar>.drSel{flex:1 1 110px}
+}
 /* 手机端：搜索框占满一行，两个筛选/计数换行排开 */
 @media(max-width:767px){
   .ctSearch{width:100%!important;flex:1 1 100%}
   .drBar>.drBtn{flex:0 0 auto}
 }
-/* 日志表：时间列窄、说明列自适应；手机上「对象+说明+结果」折成一张卡 */
+/* 日志表：时间列窄、说明列自适应；手机上折成「时间 · 对象 · 结果」+「说明」两行 */
 .flog-wrap{min-width:0}
+/* [v17.3] 用户要求：日志内容居中、时间列居左。
+   原来「结果」列 text-right、其余继承 table 的 text-left，宽表下一行三种对齐，整行看着是散的。 */
+.flog-wrap th,.flog-wrap td{text-align:center}
+/* 时间列单独拉回左对齐（表头 + lg-t 一起），日志正文（对象/说明/结果）保持居中 */
+.flog-wrap th:first-child,.flog-wrap td.lg-t{text-align:left}
 .flog-wrap td.lg-t{width:96px}
 .flog-wrap td.lg-d{max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 说明文字多包了一层 .lg-dc（手机端要 line-clamp，见下面的媒体查询），
+   桌面端的单行省略号必须跟着搬到内层，否则 td 上的 text-overflow 对子块无效。 */
+.flog-wrap td.lg-d .lg-dc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .flog-wrap td.lg-r{width:92px}
 .flog-wrap td.lg-o{max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:767px){
-  .flog-wrap{overflow:visible!important}
+  .flog-wrap{overflow:visible!important;max-height:none!important;min-width:0!important}
   .flog-wrap table{display:block!important;width:100%!important;min-width:0!important}
   .flog-wrap thead{display:none!important}
   .flog-wrap tbody{display:block!important;width:100%}
-  .flog-wrap tr{display:grid;grid-template-columns:1fr auto;column-gap:10px;row-gap:3px;
-    border:1px solid var(--line);border-radius:12px;padding:11px 12px;margin:0 0 9px!important;box-sizing:border-box}
+  /* [v17.2] 用户反馈：每条日志占 3 行（时间 / 对象 / 说明各一行），太松散。
+     改成两行：第一行 = 时间 · 对象 · 结果徽章，第二行 = 说明整行。
+     原来那套 grid-template-areas（obj/dsc + tm/res）已被本段取代，旧副本一并删掉。
+     [v17.3] 用户要求居中 → [v17.4]「对应用户放到日期旁边，大小颜色一致」：
+     第一行 = 时间 + 对象 并排贴左（字号/颜色/字重与时间完全一致，11px + --txt3 + 400），
+     当成一条灰色元信息；说明行仍居中；结果徽章（只有失败/被拒才有）推到最右。
+     列宽 auto 1fr auto：时间列 auto，对象紧贴其右（justify-self:start），徽章 auto 贴右。 */
+  .flog-wrap tr{display:grid;grid-template-columns:auto 1fr auto;column-gap:8px;row-gap:3px;
+    border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:0 0 9px!important;box-sizing:border-box}
   .flog-wrap td{display:block!important;width:auto!important;min-width:0;max-width:none!important;padding:0!important;border:none!important}
-  .flog-wrap td.lg-t{grid-column:1;grid-row:1;width:auto;font-size:11px}
-  .flog-wrap td.lg-r{grid-column:2;grid-row:1;width:auto;text-align:right}
-  .flog-wrap td.lg-o{grid-column:1/-1;grid-row:2;max-width:none!important;font-weight:600;font-size:13px}
-  .flog-wrap td.lg-d{grid-column:1/-1;grid-row:3;max-width:none!important;white-space:normal;
-    font-size:11.5px;color:var(--txt3);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  /* ⚠️ 上面那句 padding:0!important 会被 `#content table td{padding:8px!important}`（≤640px）
+     压掉：id 选择器 (1,0,2) 的权重高于类选择器 (0,1,1)，两边都带 !important 时看权重。
+     后果是每个单元格白吃 16px 内边距 → 两行卡片被撑成 90px。这里用同权重的选择器补回来。 */
+  #content .flog-wrap td{padding:0!important}
+  .flog-wrap td.lg-t{grid-column:1;grid-row:1;width:auto;align-self:center;white-space:nowrap;
+    justify-self:start;text-align:left;
+    font-size:11px;color:var(--txt3);letter-spacing:.02em}
+  .flog-wrap td.lg-o{grid-column:2;grid-row:1;max-width:62vw!important;align-self:center;
+    justify-self:start;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    font-size:11px;font-weight:500;color:var(--txt3)}
+  .flog-wrap td.lg-r{grid-column:3;grid-row:1;width:auto;justify-self:end;align-self:center;text-align:right}
+  .flog-wrap td.lg-d{grid-column:1/-1;grid-row:2;max-width:none!important;white-space:normal;
+    text-align:center;font-size:11.5px;line-height:1.45;color:var(--txt3)}
+  /* 截断必须挂在 td 里的**普通块**上：td 是 grid item，任何 display 都会被 blockify
+     （-webkit-box → flow-root），line-clamp 直接失效——上一版就是这么静默失败的。 */
+  .flog-wrap td.lg-d .lg-dc{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;
+    overflow:hidden;white-space:normal}
 }
 
 /* ===== [v17.0 20261021] 火花状态识别：已断·重燃中 / 待抓取 =====
@@ -2058,3 +2092,126 @@ html.msopen,html.msopen body{overflow:hidden!important}
 .b-rev{background:rgba(255,122,69,.14);color:#ffb59a;border-color:rgba(255,122,69,.38)}
 .fcar-revive{border-color:rgba(255,122,69,.42);
   background:linear-gradient(180deg,rgba(255,122,69,.07),transparent 62%)}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   [v18 20261115] 日报页精简
+   目标：只留「不写就会看错」的信息，其余交给布局。
+   · 头部：标题 + 主操作 + 筛选栏 + 一行统计（去掉副标题、勾选框、查询按钮、装饰图标）
+   · KPI：2×2 网格，去掉分隔线与图标方块，副行只说数字之外的那半句
+   · 账号行：2×2 标签格子 → 一句内联元信息；正常不再挂徽章
+   · 好友明细：手机端两行重排，状态不再被挤进横向滚动
+   ══════════════════════════════════════════════════════════════════════════ */
+.drHeadCard{background:#141a26;border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:14px 16px 12px}
+.drHeadTop{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.drTitle{font-size:17px;font-weight:700;line-height:1.2;color:var(--txt);letter-spacing:-.01em;margin:0}
+.drHeadTop .drBtn{height:30px;padding:0 11px;font-size:12.5px}
+.drHeadCard .drBar{margin-top:11px}
+.drStat{display:flex;flex-wrap:wrap;gap:0 8px;margin-top:9px;font-size:11px;line-height:1.55;color:var(--txt3)}
+.drStat span:empty{display:none}
+.drSel--date{min-width:150px}
+
+/* KPI：2×2（手机）/ 1×4（桌面） */
+.drKpi{background:#141a26;border:1px solid rgba(255,255,255,.07);border-radius:12px;
+  padding:11px 13px;display:flex;flex-direction:column;gap:4px}
+.drKpiTop{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.drKpiLb{font-size:11px;letter-spacing:.04em;color:var(--txt3)}
+.drKpiVal{font-size:26px;font-weight:700;line-height:1.1;color:var(--txt);
+  display:flex;align-items:baseline;gap:4px}
+.drKpiUnit{font-size:11.5px;font-weight:400;color:var(--txt3)}
+.drKpiSub{font-size:11.5px;line-height:1.35;color:var(--txt3);min-height:16px}
+
+/* 账号行 */
+.drAcc{padding:11px 18px;border-bottom:1px solid rgba(255,255,255,.06)}
+.drAcc:last-child{border-bottom:0}
+.drAccTop{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.drAccName{display:flex;align-items:baseline;gap:8px;min-width:0;
+  font-size:13.5px;font-weight:600;color:var(--txt);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drAccId{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--txt3);flex:0 0 auto}
+.drAccMeta{display:flex;flex-wrap:wrap;gap:3px 16px;margin-top:4px;font-size:11.5px;color:var(--txt2)}
+.drAccMeta b{font-weight:400;color:var(--txt3);margin-right:5px}
+.drAccMeta i{font-style:normal;cursor:pointer}
+.drAccFails{margin-top:5px;font-size:11.5px;line-height:1.5;color:#ff8a8a}
+.drAccFails b{font-weight:400;color:var(--txt3);margin-right:5px}
+.drPill{display:inline-flex;align-items:center;height:19px;padding:0 8px;border-radius:999px;
+  font-size:10.5px;letter-spacing:.03em;white-space:nowrap}
+.drPill--bad{background:rgba(239,68,68,.14);border:1px solid rgba(239,68,68,.38);color:#ff9a9a}
+.drPill--warn{background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);color:#f5a623}
+
+/* [v18.5] 「好友明细」整块已下线（与「好友与火花」页重复），原来的 #drFriends
+   两行重排规则（frN/frS/frD/frA + table{display:block}）一并删除，避免死代码。 */
+@media(max-width:767px){
+  /* 账号元信息固定两列：今日/昨日 一行，火花/登录态 一行，
+     否则「登录态 有效」会孤零零掉到第三行。 */
+  .drAccMeta{display:grid;grid-template-columns:1fr 1fr;gap:3px 10px}
+}
+/* 系统卡「告警 24h」：只放一条 + 条数，超出用省略号，别把整段原始告警铺成多行 */
+.drAlertOne{font-size:11.5px;line-height:1.4;text-align:right;max-width:62%;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ==========================================================================
+   [v18.6] 界面收敛（2026-11-24）：同一信息只留一处，去掉纯装饰占位。
+   全部规则都是「命中即隐藏」，不改 DOM 结构；整段删除即可完全还原。
+   ========================================================================== */
+@media (min-width:768px){
+  /* 顶栏右侧的「数据每 6 小时自动抓取 · 最近抓取 06:00」芯片是写死的装饰文案，
+     副标题 / 正文里已有同一信息（窄屏本来就被 .hidden 隐藏，这里让桌面也一致）。 */
+  #topbar div[class*="hidden"][class*="xl:flex"]{display:none!important}
+  /* 抖音账号页正文重复了一遍顶栏副标题「共 N 个账号 · 登录态每轮任务前校验 + 抓取芯片」 */
+  #view-accounts #addAccBox + div{display:none!important}
+  /* 总览好友行：右侧「59/1600天」与左侧大数字重复，只留里程碑文案 + 进度条 */
+  #content .ov-rk .ov-rk-mile span.text-outline{display:none!important}
+  /* 执行台账：范围切换旁的「近 7 天 · 共 N 条记录」与 fbar 上的计数重复 */
+  #content .recBar .seg__note{display:none!important}
+}
+/* 底部引擎条：右侧 TOKEN_VALIDITY / SPARK_ENGINE 与左侧队列数、延迟都是静态占位，
+   只保留「守护调度器正常运行中」（与窄屏既有处理一致）。 */
+#app footer>div:last-child{display:none!important}
+#app footer>div:first-child>span:nth-child(n+2){display:none!important}
+
+/* ==========================================================================
+   [v18.7] 面板用户改版 + 好友页宽度对齐（2026-11-24）
+   ========================================================================== */
+/* 1) 好友页：顶部 statCard / flistCard 是满宽，底部「抓取到的联系人」「好友操作日志」
+   却被 [v15] 的 max-width:940px 截窄，宽屏下两段左右边不齐。统一回满宽。 */
+@media (min-width:768px){
+  #view-friends .narrowSec{max-width:none}
+}
+/* 2) 面板用户：表头「推送通道」改成可点击入口（点它打开推送设置弹窗），
+   虚线 + 齿轮图标提示「这里可以点」。 */
+.puTh{display:inline-flex;align-items:center;gap:4px;padding:0;border:0;background:none;
+  font:inherit;color:inherit;letter-spacing:inherit;text-transform:inherit;cursor:pointer;
+  text-decoration:underline dotted;text-underline-offset:3px;text-decoration-color:rgba(255,122,69,.45)}
+.puTh:hover{color:#ff7a45}
+/* 3) 微信绑定列删除后表格只剩 5 列，820px 的硬下限跟着收一档，
+   中等宽度下少出横向滚动条。 */
+.puTable{min-width:760px}
+/* 面板用户页正文第一行「权限与推送通道配置 · 共 N 个用户」与顶栏副标题重复，
+   桌面端隐藏（手机端仍保留，因为手机上顶栏副标题被折叠）。 */
+@media (min-width:768px){
+  #view-panelusers > div:first-child{display:none!important}
+}
+
+/* ==================== [v20] 顶栏只留标题 · 操作按钮移至正文顶部 ==================== */
+@media (max-width:1023px){
+  /* 顶栏现在只剩「导航键 + 标题」一个子项；旧的 >div:last-child{margin-left:auto}
+     会把它整块推到右边，这里按 :only-child 收回左侧对齐。 */
+  #topbar>div:only-child{flex:0 1 auto!important;margin-left:0!important}
+}
+/* 工具条本身不拦截滚动；窄屏允许整行换行，右侧组仍贴右 */
+#pageTools{position:relative;z-index:12}
+#pageTools>div{min-width:0}
+/* 工具条里主操作与四件套之间已有 gap-3，去掉原顶栏的竖线分隔（只有图标时那条线是多余的） */
+#pageTools .hdrTools{border-left:0;padding-left:0}
+@media (max-width:560px){
+  #pageTools .hdrPrimary span:last-child{display:none}
+  #pageTools .hdrPrimary{padding-left:10px;padding-right:10px}
+}
+
+/* ==================== v21：四件套留在顶栏 + 好友合并大卡 ==================== */
+/* [v21.2] 四件套回到顶栏右侧原位置（HDR 内渲染），不再有 #sbTools / #meTools 挂载点 */
+/* 工具条为空时整块收起，避免它在 #content 的 gap-6 里白占一行 */
+#pageTools:empty{display:none}
+/* 好友合并大卡：芯片不换行折断（窄屏由外层 flex-wrap 处理整体换行） */
+#friendChips button{white-space:nowrap}
+/* 日报卡头：窄屏「立即推送 + 刷新」仍压在一行，标题过长才允许换行 */
+@media (max-width:480px){.drHeadTop{flex-wrap:wrap}}

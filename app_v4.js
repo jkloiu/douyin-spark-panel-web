@@ -326,13 +326,28 @@ async function api(path,opts){
   if(!r.ok){const e=new Error((data&&data.error)||('HTTP '+r.status));e.data=data;throw e;}
   return data;
 }
+/* [20261114] 头像 URL 统一出口。
+   背景：浏览器渲染 <img src="/data/avatars/x.jpg"> 不会带 X-Panel-Token，这条链过去
+   只靠登录时写下的 panel_token cookie（后端 before_request 会把它塞回请求头）。
+   但那个 cookie 是登录那一刻定死的 30 天、不随会话滑动续期 —— 过期后接口一切正常、
+   头像却全部 401，`data-error` 一删就只剩首字母，用户看到的就是「头像突然没了」。
+   现在统一把 token 拼进查询串（后端 require_token_qs 认），cookie 在不在都能出图。 */
+function avSrc(p){
+  if(!p)return '';
+  let s=String(p);
+  if(s.indexOf('data/')===0)s='/'+s;
+  else if(s.indexOf('http')===0)s='/api/avatar?url='+encodeURIComponent(s);
+  /* /static/avatars/*.webp 是公开静态资源，不用带 token，带了反而污染缓存键 */
+  if(s.indexOf('/data/avatars')!==0&&s.indexOf('/api/avatar')!==0)return s;
+  let t='';
+  try{t=localStorage.getItem('panel_token')||'';}catch(e){}
+  if(!t)return s;
+  return s+(s.indexOf('?')>=0?'&':'?')+'token='+encodeURIComponent(t);
+}
 function avatarHtml(a,name){
   const ch=esc((name||'?').trim().charAt(0)||'?');
   if(a){
-    let src;
-    if(a.startsWith('data/')){src='/'+a;}
-    else if(a.startsWith('http')){src='/api/avatar?url='+encodeURIComponent(a);}
-    else{src=a;}
+    const src=avSrc(a);
     return '<div class="favatar"><span>'+ch+'</span><img src="'+esc(src)+'" alt="" data-error="this.remove"></div>';
   }
   return '<div class="favatar"><span>'+ch+'</span></div>';
@@ -392,7 +407,7 @@ function avPanelUrl(key){
 function avFill(el,src,fallbackHtml){
   if(!el)return;
   if(src){
-    el.innerHTML='<img src="'+esc(src)+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit">';
+    el.innerHTML='<img src="'+esc(avSrc(src))+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit">';
     el.style.overflow='hidden';
   }else{
     el.innerHTML=fallbackHtml;
@@ -418,7 +433,7 @@ function avApply(el,kind,key,fallbackHtml){
 function accAvImg(a){
   const av=(a&&a.avatar)||'';
   if(!av)return '';
-  const src=(av.indexOf('data/')===0)?('/'+av):(av.indexOf('http')===0?('/api/avatar?url='+encodeURIComponent(av)):av);
+  const src=avSrc(av);   /* [20261114] 统一走 avSrc，带 ?token= 免 cookie */
   return '<img src="'+esc(src)+'" alt="" data-error="this.remove" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;z-index:2;border-radius:inherit">';
 }
 /* 账号头像垫底字母（无真实头像或图裂时显示） */
@@ -783,6 +798,8 @@ const App={
     const el=ensureView(v);el.classList.add('on');
     /* [v4.9] 顶栏逐页移植 Stitch 各稿 <header>（标题/副题/动作簇都在模板里） */
     const _tb=document.getElementById('topbar');if(_tb){_tb.innerHTML=HDR(v);fixStaticIcons(_tb);}
+    /* [v20] 操作按钮全部挪到正文顶部工具条 */
+    const _pt=document.getElementById('pageTools');if(_pt){_pt.innerHTML=TOOLBAR(v);fixStaticIcons(_pt);}
     /* [v6.4] 顶栏是 HDR() 重建的，内联头像已随之刷新；账号下拉菜单内容在这里补一次，
        否则切到非 accounts 页后点开账号切换是空的
        [v6.13] 不再以「有没有抖音账号」为条件：无账号的用户也要能点开面板用户菜单 */
@@ -936,7 +953,7 @@ const App={
     avApply(document.getElementById('sbAvatar'),'pu',lu,lu.charAt(0));
     this.updateSideStats();
   },
-  /* [v3 新增] 侧栏底部两块系统指标 + 顶部「立即续火花」的账号守卫。
+  /* [v3 新增] 侧栏底部两块系统指标；[v21] 原「顶部立即续火花」守卫随按钮一起删除。
      数据来源都取自已有接口（App.state._schedTasks 来自 /api/schedule，App.state.status.disk 来自 /api/status），
      没有新接口、没有额外请求。 */
   updateSideStats(){
@@ -963,9 +980,7 @@ const App={
         const pct=typeof parseDisk==='function'?parseDisk(st.disk):null;
         dk.textContent=(pct!=null?pct+'%':'—');
       }
-      const q=document.getElementById('quickSparkBtn');
-      if(q){const noAcc=!this.state.isAdmin&&!(this.state.accounts||[]).length;
-        q.disabled=!!noAcc;q.title=noAcc?'尚未分配抖音账号':'';}
+      /* [v21] 总览的「立即续火花」已按用户要求删除，守卫一并去掉 */
     }catch(e){}
   },
   currentTargets(){
@@ -1030,7 +1045,6 @@ function _hdrAcc(){
 function _hdrBell(){return '<button class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors relative shrink-0" title="消息中心" data-click="Actions.bellClick">'+MI('notifications','text-[19px]')+
   '<span class="msgBadgeTop" style="position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;font-size:10px;min-width:16px;height:16px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 4px;font-family:\'JetBrains Mono\',monospace"></span></button>';}
 function _hdrRefresh(){return '<button class="hdrRefresh w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors shrink-0" title="刷新" data-click="App.refresh">'+MI('refresh','text-[19px]')+'</button>';}
-function _hdrFetchChip(){return '<div class="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant/20 font-mono-code-sm text-mono-code-sm text-on-surface-variant shrink-0"><span class="w-2 h-2 rounded-full bg-tertiary"></span><span>数据每 6 小时自动抓取 · 最近抓取 06:00</span></div>';}
 /* [v6.2] 右上角固定三件套：头像（抖音账号切换）· 设置 · 提醒 */
 function _hdrGear(){return '<div class="relative shrink-0" id="setSwitch">'+
   '<button class="w-8 h-8 rounded-lg flex items-center justify-center text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors" title="设置" data-click="App.toggleSetMenu">'+MI('settings','text-[19px]')+'</button>'+
@@ -1040,129 +1054,32 @@ function _hdrGear(){return '<div class="relative shrink-0" id="setSwitch">'+
    页专属内容（抓取芯片 / 主按钮 / 日期步进器等）放在它左边，由外层 gap-3 排版。 */
 function _hdrTools(){return '<div class="hdrTools flex items-center gap-1 border-l border-outline-variant/30 pl-2 shrink-0">'+
   _hdrRefresh()+_hdrAcc()+_hdrGear()+_hdrBell()+'</div>';}
+/* [v20] 顶栏只留「导航键 + 标题 + 右侧工具簇」。按用户要求：副标题、绿点小字、
+   「数据每 6 小时自动抓取 / 最近抓取 06:00」芯片、执行台账的 LEDGER LOGS 橙标全部删除；
+   页面主按钮改由各模块标题行承载（见 TOOLBAR(v) 注释）。
+   [v21.2] 四件套（刷新·头像·设置·提醒）按用户要求**留在头像旁原位置**——
+   即顶栏最右侧，所有页面常驻，不再搬去侧栏底部/「我的」页。 */
+var _HDR_TITLE={overview:'总览',friends:'好友与火花',tasks:'任务与日志',accounts:'抖音账号',logs:'执行台账',daily:'日报',panelusers:'面板用户',me:'我的',contacts:'抓取联系人',push:'推送设置',notifications:'通知中心',sysstatus:'系统状态',frienddetail:'好友详情'};
 function HDR(v){
-  if(v==='overview'){
-    /* 01 稿（PNG 基准）：标题 + 绿点副题 + 最近抓取芯片 + 立即续火花 + 铃铛 */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><div class="flex items-baseline gap-3 min-w-0">'+
-      '<h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight shrink-0">总览</h1>'+
-      '<span class="hidden sm:flex items-center gap-1.5 text-body-sm font-body-sm text-outline min-w-0"><span class="w-1.5 h-1.5 rounded-full bg-tertiary shrink-0"></span><span class="truncate">数据每 6 小时自动抓取</span></span>'+
-      '</div></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+_hdrFetchChip()+
-      '<button id="quickSparkBtn" class="h-8.5 px-3.5 bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-body-sm font-semibold rounded-lg flex items-center gap-1.5 shadow-sm active:scale-95 transition-all" data-click="Actions.run" data-args="main|null|false" data-pass-this="1">'+MI('bolt','text-[17px]',1)+'<span>立即续火花</span></button>'+
-      _hdrTools()+'</div>';
-  }
-  if(v==='friends'){
-    /* 02 稿：分段状态筛选 + 工具图标（[v6.4] 按用户要求移除右上角「添加好友」按钮） */
-    return '<div class="flex items-center gap-4 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight">好友与火花</h1>'+
-      '<p id="hdrFrSub" class="text-body-sm font-body-sm text-outline mt-0.5 truncate">共 … 位守护好友 · 数据每 6 小时自动抓取 · 最近抓取 06:00</p></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+
-      '<div id="hdrFriendChips" class="hdrHideMd bg-surface-container-lowest p-1 rounded-lg border border-surface-container-high flex items-center text-body-sm font-body-sm"></div>'+
-      _hdrTools()+'</div>';
-  }
-  if(v==='tasks'){
-    /* 03 稿：Live 状态胶囊 + 遥测图标 + 立即执行 */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><h1 class="text-headline-lg font-headline-lg font-bold text-on-surface tracking-tight leading-none truncate">任务与日志</h1>'+
-      '<p class="text-body-sm font-body-sm text-on-surface-variant mt-1 truncate">定时任务 · 运行日志 · 执行留痕</p></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+
-      '<div id="hdrRunPill" style="display:none" class="flex items-center gap-2 bg-tertiary-container/10 border border-tertiary/30 px-3 py-1.5 rounded-full shrink-0">'+
-      '<span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-tertiary opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-tertiary"></span></span>'+
-      '<span id="hdrRunPillTxt" class="text-mono-code-sm font-mono-code-sm text-tertiary font-semibold">任务运行中</span></div>'+
-      _hdrTools()+'</div>';
-  }
-  if(v==='accounts'){
-    /* 04 稿：同步芯片 + 工具图标（[v6.4] 补回刷新按钮：此前漏了 _hdrRefresh） */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="flex items-baseline gap-2.5 min-w-0"><h1 class="font-headline-lg text-headline-lg font-bold text-on-surface tracking-tight shrink-0">抖音账号</h1>'+
-      '<span id="hdrAcSub" class="font-body-sm text-body-sm text-on-surface-variant truncate">共 … 个账号 · 登录态每轮任务前校验</span></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+_hdrFetchChip()+
-      _hdrTools()+'</div>';
-  }
-  if(v==='logs'){
-    /* 05 稿：LEDGER LOGS 徽章 + 日期芯片 + 导出 CSV + 立即续火花 + 刷新 */
-    return '<div class="flex flex-col justify-center min-w-0">'+_hdrMenuBtn()+
-      '<div class="flex items-center gap-2 min-w-0"><h1 class="font-headline-md text-headline-md font-bold text-on-surface tracking-tight shrink-0">执行台账</h1>'+
-      '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono-code-sm bg-primary-container/10 text-primary-container border border-primary-container/20 shrink-0">LEDGER LOGS</span></div>'+
-      '<p class="font-body-sm text-body-sm text-outline mt-0.5 truncate hidden sm:block">执行台账留痕 · 可追溯每一次发送</p></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+
-      '<div class="hdrHideSm hidden xl:flex items-center gap-2 mr-2 text-[11px] font-mono-code-sm text-outline shrink-0">'+
-      '<span class="flex items-center gap-1 bg-surface-container-low px-2.5 py-1 rounded-md border border-outline-variant/20"><span class="w-1.5 h-1.5 rounded-full bg-primary-container"></span>数据每 6 小时自动抓取</span>'+
-      '<span class="bg-surface-container-low px-2.5 py-1 rounded-md border border-outline-variant/20 text-on-surface-variant">最近抓取 06:00</span></div>'+
-      _hdrTools()+'</div>';
-  }
-  if(v==='daily'){
-    /* 06 稿：[v6.15] 顶栏的「‹ 今天 ›」日期步进器按用户要求删除 ——
-       日期改由正文里的「日期」输入框控制（留空 = 今天实时生成）。 */
-    return '<div class="flex items-baseline gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<h1 class="text-headline-md font-headline-md font-bold text-on-surface shrink-0">日报</h1>'+
-      '<span class="text-body-sm font-body-sm text-on-surface-variant truncate hidden sm:inline">按抖音号汇总 · 每日 09:00 / 18:00 推送</span></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+
-      '<button class="hdrPrimary inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-primary-container hover:bg-[#ff925c] text-white font-headline-md text-body-md shadow-[0_0_12px_-2px_rgba(255,122,69,0.35)] transition-all active:scale-95 duration-150" data-click="Actions.pushDailyReport" data-pass-this="1">'+MI('send','text-[16px]')+'<span>立即推送</span></button>'+
-      _hdrTools()+'</div>';
-  }
-  if(v==='panelusers'){
-    /* 08 稿：面包屑胶囊 + 批量导出 + 添加用户 + 快捷图标 */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<h1 class="text-headline-lg font-headline-lg text-white tracking-tight shrink-0">面板用户</h1>'+
-      '<span class="text-[#2f3a4c] shrink-0">/</span>'+
-      '<span id="hdrPuSub" class="text-body-sm font-body-sm text-on-surface-variant bg-[#151b26] border border-[#232b38] px-2 py-0.5 rounded-full truncate">权限与推送通道配置</span></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+
-      '<div class="hidden xl:flex items-center gap-2 px-2.5 py-1 rounded bg-[#151b26] border border-[#232b38] text-on-surface-variant font-mono-code-sm text-[11px] shrink-0"><span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span><span>最近抓取 06:00 · 自动轮询中</span></div>'+
-      _hdrTools()+'</div>';
-  }
-  if(v==='me'){
-    /* [v8] 「我的」：对齐小程序 pages/me —— 窄屏 tabBar 的第 5 个 tab */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight">我的</h1>'+
-      '<p class="text-body-sm font-body-sm text-outline mt-0.5 truncate">'+esc(App.state.loginUser||'未登录')+(App.state.isAdmin?' · 管理员':' · 普通用户')+'</p></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+_hdrTools()+'</div>';
-  }
-  /* =====================================================================
-     [v9] 小程序页面 1:1 对齐 —— 以下 5 个视图对应微信小程序的二级页，
-     入口统一在「我的」页（#me），返回键由 _hdrMenuBtn() 里的 #hdrBack 提供。
-     取值口径：v 一律取自 location.hash 冒号前那段（见 route() / _curView）。
-     ===================================================================== */
-  if(v==='contacts'){
-    /* 对应小程序 pages/contacts —— 抓取抖音会话列表 */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight">抓取联系人</h1>'+
-      '<p class="text-body-sm font-body-sm text-outline mt-0.5 truncate">读取抖音会话列表 · 点行加入名单</p></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+_hdrTools()+'</div>';
-  }
-  if(v==='push'){
-    /* 对应小程序 pages/push —— 推送设置 */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight">推送设置</h1>'+
-      '<p class="text-body-sm font-body-sm text-outline mt-0.5 truncate">微信服务通知 / 第三方通道</p></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+_hdrTools()+'</div>';
-  }
-  if(v==='notifications'){
-    /* 对应小程序 pages/notifications —— 通知中心 */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight">通知中心</h1>'+
-      '<p class="text-body-sm font-body-sm text-outline mt-0.5 truncate">历史推送与异常告警</p></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+_hdrTools()+'</div>';
-  }
-  if(v==='sysstatus'){
-    /* 对应小程序 pages/sys-status —— 系统状态 */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight">系统状态</h1>'+
-      '<p class="text-body-sm font-body-sm text-outline mt-0.5 truncate">浏览器锁 · 运行中的任务 · 下次执行</p></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+_hdrTools()+'</div>';
-  }
-  if(v==='frienddetail'){
-    /* 对应小程序 pages/friend-detail —— 好友详情（名字由 state 带过来） */
-    return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-      '<div class="min-w-0"><h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight">好友详情</h1>'+
-      '<p class="text-body-sm font-body-sm text-outline mt-0.5 truncate">'+esc(App.state.fdName||'火花明细 · 单独操作')+'</p></div></div>'+
-      '<div class="flex items-center gap-3 shrink-0">'+_hdrTools()+'</div>';
-  }
-  /* 兜底（不应到达）：通用顶栏 */
   return '<div class="flex items-center gap-3 min-w-0">'+_hdrMenuBtn()+
-    '<h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight truncate">控制台</h1></div>'+
+    '<h1 class="text-headline-md font-headline-md font-bold text-on-surface tracking-tight truncate">'+esc(_HDR_TITLE[v]||'控制台')+'</h1></div>'+
     '<div class="flex items-center gap-3 shrink-0">'+_hdrTools()+'</div>';
+}
+/* [v21] 正文顶部工具条只保留**页面内无处安放**的临时控件（任务运行胶囊）。
+   页面主操作全部回到各自模块标题右侧：
+   · 好友页：添加好友 + 3 格 KPI + 4 档筛选 → 合并进「好友与火花」大卡；
+   · 任务页：添加 → 定时任务列表卡头；日报页：立即推送 → 火花守护日报卡头；
+   · 总览页：立即续火花删除（用户要求）。
+   [v21.2] 四件套留在顶栏右侧原位置（HDR 内直接渲染），此处不再挂载。 */
+function TOOLBAR(v){
+  var L='';
+  if(v==='tasks'){
+    L+='<div id="hdrRunPill" style="display:none" class="items-center gap-2 bg-tertiary-container/10 border border-tertiary/30 px-3 py-1.5 rounded-full shrink-0">'+
+      '<span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-tertiary opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-tertiary"></span></span>'+
+      '<span id="hdrRunPillTxt" class="text-mono-code-sm font-mono-code-sm text-tertiary font-semibold">任务运行中</span></div>';
+  }
+  if(!L)return '';
+  return '<div class="flex items-center gap-2 flex-wrap">'+L+'</div>';
 }
 /* ---------- 顶栏动态补丁（由各 loader 在数据到位后调用） ---------- */
 function _hdrFriends(cnt){
@@ -1172,23 +1089,13 @@ function _hdrFriends(cnt){
   const chip=(k,t,extra)=>'<button type="button" class="'+(ff===k?A:I2)+(k==='risk'?' flex items-center gap-1':'')+'" data-click="Actions.friendFilter" data-args="'+k+'">'+t+' ('+(cnt[k]||0)+')'+(extra?'<span class="w-1.5 h-1.5 rounded-full bg-error"></span>':'')+'</button>';
   /* [v11] 4 档口径对齐小程序 spark 页：全部 / 需关注 / 注意 / 正常（旧的 已续/待续 被取代） */
   const _chips=chip('all','全部')+chip('risk','需关注')+chip('warn','注意')+chip('ok','正常');
-  const box=document.getElementById('hdrFriendChips');
+  /* [v21] 芯片并入「好友与火花」大卡（#friendChips），不再分桌面顶栏/手机卡内两处 */
+  const box=document.getElementById('friendChips');
   if(box)box.innerHTML=_chips;
-  const mob=document.getElementById('friendChipsM');
-  if(mob)mob.innerHTML='<div class="bg-surface-container-lowest p-1 rounded-lg border border-surface-container-high flex items-center text-body-sm font-body-sm">'+_chips+'</div>';
-  const sub=document.getElementById('hdrFrSub');
-  if(sub)sub.textContent='共 '+cnt.all+' 位守护好友 · 数据每 6 小时自动抓取 · 最近抓取 06:00';
   const fs=document.getElementById('fvSearch');
   if(fs&&document.activeElement!==fs)fs.value=App.state._fsQ||'';
   const fm=document.getElementById('fvSearchM');
   if(fm&&document.activeElement!==fm)fm.value=App.state._fsQ||'';
-}
-function _hdrAccounts(){
-  const n=(App.state.accounts||[]).length;
-  const sub=document.getElementById('hdrAcSub');
-  if(sub)sub.textContent='共 '+n+' 个账号 · 登录态每轮任务前校验';
-  const b=document.getElementById('hdrImpBtn');
-  if(b&&App.state.currentAccount)b.setAttribute('data-arg',App.state.currentAccount);
 }
 function _hdrPanelUsers(n){
   const el=document.getElementById('hdrPuSub');
@@ -1198,7 +1105,7 @@ function _hdrLogs(){
   /* [v11] 记录页改成「发送记录 / 运行日志」两 tab，日期筛选已下线（小程序 records 页没有日期筛选） */
   const n=(App.state._recRecs||[]).length;
   const h=document.getElementById('hdrDateTxt');
-  if(h)h.textContent='已载入 '+n+' 条记录';
+  if(h)h.textContent='近 '+(App.state._recKeepDays||REC_KEEP_DAYS)+' 天 · '+n+' 条记录';
 }
 const Loaders={};
 /* =========================================================================
@@ -1345,19 +1252,21 @@ function sparkLevel(days, f){
     const core=(dn!=null&&tt!=null)?('重燃 '+dn+'/'+tt):'重燃中';
     return{k:'revive',t:core+(lf!=null?(' · 剩'+lf+'天'):''),c:'b-rev'};
   }
-  if(st==='none')return{k:'none',t:'无火花',c:'b-no'};
-  if(st==='unknown')return{k:'none',t:'待抓取',c:'b-wait'};
-  if(days==null||days===''||isNaN(Number(days)))return{k:'none',t:'待抓取',c:'b-wait'};
+  /* [20261024] 无火花 = 这个好友还没启动火花，属正常状态 → 灰色中性徽章；
+     「待抓取」单独用一个 k，仍算需关注（那是没抓到，需要人工确认）。 */
+  if(st==='none')return{k:'none',t:'无火花',c:'b-gray'};
+  if(st==='unknown')return{k:'unknown',t:'待抓取',c:'b-wait'};
+  if(days==null||days===''||isNaN(Number(days)))return{k:'unknown',t:'待抓取',c:'b-wait'};
   const d=Number(days);
-  if(d<=0)return{k:'none',t:'无火花',c:'b-no'};
+  if(d<=0)return{k:'none',t:'无火花',c:'b-gray'};
   if(d<=1)return{k:'broken',t:d+' 天 · 已断',c:'b-no'};
   if(d<7)return{k:'warn',t:d+' 天',c:'b-wait'};
   return{k:'ok',t:d+' 天',c:'b-ok'};
 }
-/* 「需关注」档 = 无火花 + 已断 + 已断·重燃中（待抓取也算，因为它需要人工确认） */
+/* 「需关注」档 = 已断 + 已断·重燃中 + 待抓取（无火花不算：没启动火花是常态） */
 function sparkRiskKey(days, f){
   const k=sparkLevel(days,f).k;
-  return (k==='none'||k==='broken'||k==='revive')?'risk':k;
+  return (k==='broken'||k==='revive'||k==='unknown')?'risk':k;
 }
 function _ctSid(c){return String((c&&(c.short_id||c.unique_id||c.douyin_id))||'');}
 function _ctName(c){return (c&&(c.title||c.nickname||c.douyin_nickname))||'未知';}
@@ -1375,10 +1284,13 @@ function _iniDot(txt){
 /* 好友被增删改 / 抓取完成后：按当前所在视图回流（好友详情 → 退回列表），
    不然在新页面里操作完会把结果画到 friends 视图上，当前页看起来「没反应」 */
 function _afterFriendMutate(){
-  var v=App.current();
+  var v=App.current(),p=null;
   if(v==='frienddetail'){location.hash='#friends';}
-  else if(v==='contacts'&&Loaders.contacts){Loaders.contacts();}
-  else Loaders.friends();
+  else if(v==='contacts'&&Loaders.contacts){p=Loaders.contacts();}
+  else p=Loaders.friends();
+  /* [v20] 添加好友弹窗开着时同步刷新正文（名单变化 / 已添加状态） */
+  if(p&&p.then)p.then(_frAddRender,function(){_frAddRender();});
+  else _frAddRender();
 }
 /* [v11] 火花页卡片 → 好友详情页（hash 带参数，见 _hashArg / Loaders.frienddetail） */
 _V9A.fdOpen=function(sid){
@@ -1982,7 +1894,8 @@ if(localStorage.getItem('panel_token')||document.cookie.includes('panel_token=')
       if(App.state.accounts.length){
         const saved=localStorage.getItem('current_account');
         App.state.currentAccount=(saved&&App.state.accounts.find(a=>a.unique_id===saved))?.unique_id||App.state.accounts[0]?.unique_id||null;
-        document.getElementById('accSwitch').style.display='flex';
+        /* [v21] #accSwitch 已从顶栏挪走（桌面在侧栏、手机在「我的」页），未必已挂载 → 必须判空 */
+        const _sw0=document.getElementById('accSwitch');if(_sw0)_sw0.style.display='flex';
         App.updateAccSwitcher();App.updateSidebar();
         if(App.state.isAdmin)document.getElementById('navPanelUsers').style.display='';
         // [修复20260924] 账号上下文就绪后补一次重渲染：首屏 route() 跑在
@@ -2139,7 +2052,8 @@ Loaders.overview=async function(){
         const core=(f.revive_done!=null&&f.revive_total!=null)?('重燃 '+f.revive_done+'/'+f.revive_total):'重燃中';
         return{t:core+(lf!=null?(' · 剩 '+lf+' 天'):''),c:'text-error'};
       }
-      if(_st==='none')return{t:'无火花',c:'text-error'};
+      /* [20261024] 无火花是常态（没启动火花），用中性灰，不标红 */
+      if(_st==='none')return{t:'无火花',c:'text-outline'};
       if(d==null||isNaN(v))return{t:'待抓取',c:'text-outline'};
       if(v<1)return{t:'已断火',c:'text-error'};
       const nx=MILE.find(m=>m>v);
@@ -2187,7 +2101,8 @@ Loaders.overview=async function(){
       const n=Number(f.spark_days)||0;
       const paused=f.status==='paused';
       const _st=String(f.spark_state||'');
-      const risk=!f.fresh||f.spark_days==null||_st==='revive'||_st==='none';
+      /* [20261024] 无火花不算「有风险」：没启动火花属正常状态 */
+      const risk=!f.fresh||f.spark_days==null||_st==='revive';
       const s=paused?{k:'paused',t:'已停用'}:f.today_sent?{k:'sent',t:'已续火'}:risk?{k:'risk',t:'有风险'}:{k:'pending',t:'待续'};
       const sc=statusCls(s.k);
       const pct=f.spark_days==null?0:Math.max(2,Math.round(n/_maxN*100));
@@ -2271,6 +2186,64 @@ function _ovRecKw(v){App.state._ovRecQ=(v||'').trim();
 }
 /*================ 好友与火花 ================*/
 /*================ 好友与火花（Stitch 02 稿 1:1 还原） ================*/
+/* ===== [v20] 添加好友弹窗（好友页工具条「添加好友」打开） =====
+   原好友页内嵌的「添加好友功能条 + 抓取到的联系人」整块搬到这里；
+   页面正文只留火花卡片与操作日志，抓取结果只在弹窗里出现。 */
+function _frAddBodyHtml(){
+  const exSids=new Set((App.state.friends||[]).map(f=>f.short_id));
+  const _all=App.state.scrapedContacts||null;
+  const _nm=_all?_all.filter(c=>(c.chat_state||'')==='non_mutual'):[];
+  const _shown=_all?(App.state.showNonMutual?_all:_all.filter(c=>(c.chat_state||'')!=='non_mutual')):[];
+  let h='<div class="flex items-center gap-2 flex-wrap">'+
+    '<input type="hidden" id="addMode" value="uid">'+
+    '<input id="addUid" class="dark-input h-9" style="flex:1 1 220px;min-width:0" placeholder="输入抖音号 unique_id 添加">'+
+    '<button class="h-9 px-3.5 rounded-lg bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold flex items-center gap-1.5 active:scale-95 transition-all shrink-0" data-click="Actions.addFriend" data-pass-this="1">'+MI('person_add','text-[16px]')+'添加</button>'+
+    '<button class="h-9 px-3.5 rounded-lg bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors shrink-0" data-click="Actions.scrapeContacts" data-pass-this="1" title="抓取好友列表">'+MI('group','text-[16px]')+'抓取好友列表</button>'+
+    '</div>';
+  if(_all===null){
+    h+='<div class="py-12 text-center text-body-sm text-outline" style="line-height:1.9">还没有抓取过好友列表。<br>点上方「抓取好友列表」从抖音读取会话，或直接输入抖音号添加。</div>';
+    return h;
+  }
+  h+='<div class="flex items-center justify-between gap-2 flex-wrap" style="margin-top:15px">'+
+    '<div class="flex items-center gap-2 min-w-0"><b class="text-body-md font-body-md text-on-surface">抓取到的联系人</b>'+
+    '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest shrink-0">'+_shown.length+' 个 · 点击行添加</span></div>'+
+    (_nm.length?'<button class="h-8 px-3 rounded bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors" data-click="_sw_nm">'+MI('filter_list','text-[16px]')+'<span class="ml-1.5">'+(App.state.showNonMutual?'隐藏空会话':'显示空会话 ('+_nm.length+')')+'</span></button>':'')+
+    '</div>';
+  h+='<div class="overflow-x-auto custom-scroll" style="max-height:52vh;overflow-y:auto;margin-top:8px"><table class="w-full border-collapse text-left contacts-wrap" style="table-layout:fixed">'+
+    /* 弹窗宽度固定，表格用 fixed 布局 + 百分比列宽，否则「最后一条」会把整表撑宽，
+       操作列被挤到横向滚动区外面（手机端尤其明显）。 */
+    '<colgroup><col style="width:20%"><col style="width:17%"><col style="width:8%"><col><col style="width:104px"></colgroup>'+
+    '<thead><tr class="border-b border-surface-container-high/80 bg-surface-container-lowest/60 text-outline text-[11px]">'+
+    '<th class="py-2.5 px-3 font-semibold">名称</th><th class="py-2.5 px-3 font-semibold">抖音号</th><th class="py-2.5 px-3 font-semibold text-center">头像</th>'+
+    '<th class="py-2.5 px-3 font-semibold">最后一条</th><th class="py-2.5 px-3 font-semibold text-right">操作</th></tr></thead><tbody class="divide-y divide-surface-container-high/50">';
+  _shown.forEach(c=>{
+    const sid=c.short_id||'';
+    const did=c.douyin_id||c.unique_id||'';
+    const already=sid&&exSids.has(sid);
+    const cname=c.title||c.nickname||'未知';
+    const nonM=(c.chat_state||'')==='non_mutual';
+    const pv=String(c.preview||'').trim();
+    const tip=pv?('最后一条：'+pv+(c.last_time?('（'+c.last_time+'）'):'')):'（抖音会话列表里没有可读内容）';
+    const btn=already?'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-tertiary bg-tertiary-container/15 border-tertiary-container/30 whitespace-nowrap">'+MI('check','text-[12px]')+'已添加</span>'
+      :'<button class="h-7 px-3 rounded bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold active:scale-95 transition-all" '+(sid?'':'disabled')+' data-click="Actions.addContact" data-args="'+esc(sid)+'|'+esc((c.title||c.nickname||'').replace(/'/g,''))+'" data-pass-this="1">添加</button>';
+    h+='<tr class="crow hover:bg-surface-container/50 transition-colors"'+(sid?' data-click="Actions.openContact" data-args="'+esc(sid)+'"':'')+(nonM?' style="opacity:.62"':'')+'>'+
+      '<td class="cname py-2.5 px-3"><b class="text-on-surface">'+esc(cname)+'</b>'+
+      (nonM?' <span class="inline-flex items-center px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-outline bg-surface-container border-surface-container-high" title="'+esc(tip)+'">空会话</span>':'')+'</td>'+
+      '<td class="cid py-2.5 px-3 font-mono text-mono-code-sm text-outline">'+esc(did||'—')+'</td>'+
+      '<td class="cav py-2.5 px-3 text-center">'+avatarHtml(c.avatar,cname)+'</td>'+
+      '<td class="cpv py-2.5 px-3" title="'+esc(tip)+'"><div class="cpv-t">'+esc(tip)+'</div></td>'+
+      '<td class="cact py-2.5 px-3 text-right">'+btn+'</td></tr>';
+  });
+  if(!_shown.length)h+='<tr><td colspan="5" class="py-10 text-center text-body-sm text-outline">没有可添加的人</td></tr>';
+  h+='</tbody></table></div>';
+  return h;
+}
+function _frAddRender(){
+  const m=document.getElementById('frAddModal');
+  if(!m||m.style.display==='none')return;
+  const b=document.getElementById('frAddBody');
+  if(b)b.innerHTML=_frAddBodyHtml();
+}
 Loaders.friends=async function(){
   loading('friends','g3');
   try{
@@ -2310,15 +2283,24 @@ Loaders.friends=async function(){
       (unit?'<span class="statUnit">'+unit+'</span>':'')+'</div>'+
       '<div class="statLbl text-body-sm font-body-sm text-outline mt-0.5">'+label+'</div></div>';
     let html='<section class="statCard">';
+    /* [v21] 用户要求：添加好友 + 3 格 KPI + 4 档筛选合并成**一个大框**。
+       卡头左侧标题与总数，右侧「添加好友」；下面三格 KPI；最下面一行筛选芯片
+       （桌面/手机同一处渲染，#friendChips 由 _hdrFriends() 填充与刷新）。 */
+    html+='<div class="flex items-center justify-between gap-3 flex-wrap" style="padding:14px 18px 0">'+
+      '<div class="flex items-center gap-2 min-w-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface whitespace-nowrap">好友与火花</h2>'+
+      '<span class="tag">共 '+d.friends.length+' 位</span></div>'+
+      '<button class="h-8.5 px-3.5 bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-body-sm font-semibold rounded-lg flex items-center gap-1.5 shadow-sm active:scale-95 transition-all" data-click="Actions.openFriendAdd">'+MI('person_add','text-[17px]',1)+'<span>添加好友</span></button>'+
+    '</div>';
     html+='<div class="statGrid">';
     html+=_cell(d.friends.length,'位','守护好友总数');
     html+=_cell(sumDays,'天','累计火花天数');
     html+=_cell(maxF?maxDays:0,'天','最长连续记录');
     html+='</div>';
-    /* [v12.6] 徽章排（运行正常/今日点火/容量/名单最长/里程碑）按要求隐藏 */
-    /* [v16.1] 原「火花数据 · 立即抓取」独立行撤掉：抓取按钮已挪到下面
+    /* [v12.6] 徽章排（运行正常/今日点火/容量/名单最长/里程碑）按要求隐藏
+       [v16.1] 原「火花数据 · 立即抓取」独立行撤掉：抓取按钮已挪到下面
        「好友火花」卡头部，和「批量一键续火」同一行。#sparkTip / #sparkGrabBtn
        两个 id 都保留，_sparkUi() 的局部刷新逻辑不变。 */
+    html+='<div style="padding:0 18px 14px"><div id="friendChips" class="inline-flex flex-wrap items-center gap-0.5 bg-surface-container-lowest p-1 rounded-lg border border-surface-container-high text-body-sm font-body-sm"></div></div>';
     html+='</section>';
 
     /* ---------- 3) 好友火花（卡片形态，对齐小程序 spark 页；
@@ -2348,8 +2330,7 @@ Loaders.friends=async function(){
         '</button>'+
         '<button class="btn btn-primary btn-sm" data-click="Actions.openMsgPicker" data-args="main|null">'+MI('bolt','text-[15px]',1)+'批量一键续火</button>'+
       '</div></div>';
-    /* 4 档筛选：手机端放在页面内（= 小程序）；桌面端沿用顶栏芯片 */
-    html+='<div id="friendChipsM" class="fvChips md:hidden"></div>';
+    /* 4 档筛选：[v21] 已并入上方「好友与火花」大卡（#friendChips），这里不再单独渲染 */
     if(staleN)html+='<div class="stalebar">⏰ 有 '+staleN+' 位好友的火花数据不是今天的（抓取可能没覆盖到）</div>';
     html+='<div id="fvWrap">';
     html+='<div id="fvBody" class="fcardList">';
@@ -2400,77 +2381,26 @@ Loaders.friends=async function(){
     html+='</div>';
     html+='</section>';
 
-    /* ---------- 4) 添加/抓取好友（功能控制条） ---------- */
-    html+='<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] px-4 py-3 flex items-center gap-2 flex-wrap">'+
-      '<span class="text-body-sm font-body-sm text-outline shrink-0">添加好友</span>'+
-      '<input type="hidden" id="addMode" value="uid">'+
-      '<input id="addUid" class="dark-input h-8" style="flex:1;min-width:200px" placeholder="输入抖音号 unique_id 添加">'+
-      '<button class="h-8 px-3 rounded-lg bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold flex items-center gap-1.5 active:scale-95 transition-all" data-click="Actions.addFriend" data-pass-this="1">'+MI('person_add','text-[17px]')+'添加</button>'+
-      '<button class="h-8 px-3 rounded-lg bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors" data-click="Actions.scrapeContacts" data-pass-this="1">'+MI('group','text-[17px]')+'抓取好友列表</button>'+
-      (App.state.scrapedContacts&&App.state.scrapedContacts.length
-        ?(App.state.scrapedHidden
-          ?'<button class="h-8 px-3 rounded-lg bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors" data-click="_sw_show">'+MI('visibility','text-[17px]')+'展开抓取列表 ('+App.state.scrapedContacts.length+')</button>'
-          :'<button class="h-8 px-3 rounded-lg bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors" data-click="_sw_hide">'+MI('expand_less','text-[17px]')+'收起抓取列表</button>')
-        :'')+
-    '</div>';
-
-    /* ---------- 5) 抓取到的联系人 ---------- */
-    if(App.state.scrapedContacts&&App.state.scrapedContacts.length&&!App.state.scrapedHidden){
-      const exSids=new Set((d.friends||[]).map(f=>f.short_id));
-      const _all=App.state.scrapedContacts;
-      const _nm=_all.filter(c=>(c.chat_state||'')==='non_mutual');
-      const _shown=App.state.showNonMutual?_all:_all.filter(c=>(c.chat_state||'')!=='non_mutual');
-      html+='<section class="narrowSec bg-surface-container-low border border-surface-container-high rounded-[14px] overflow-hidden">';
-      html+='<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3 flex-wrap">'+
-        '<div class="flex items-center gap-3 min-w-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface shrink-0">抓取到的联系人</h2>'+
-        '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest shrink-0">'+_shown.length+' 个 · 点击行添加</span>'+
-        (_nm.length?'<span class="text-body-sm font-body-sm text-outline truncate">'+(App.state.showNonMutual?('含 '+_nm.length+' 个非互关空会话'):('另 '+_nm.length+' 个非互关空会话已隐藏'))+'</span>':'')+'</div>'+
-        '<div class="flex items-center gap-2">'+
-        (_nm.length?'<button class="h-8 px-3 rounded bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors" data-click="_sw_nm">'+MI('filter_list','text-[16px]')+'<span class="ml-1.5">'+(App.state.showNonMutual?'隐藏非互关空会话':'显示非互关空会话')+'</span></button>':'')+
-        '<button class="h-8 px-3 rounded bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm transition-colors" data-click="_sw_hide">收起</button>'+
-        '</div></div>';
-      html+='<div class="overflow-x-auto custom-scroll" style="max-height:400px;overflow-y:auto"><table class="w-full border-collapse text-left contacts-wrap">'+
-        '<thead><tr class="border-b border-surface-container-high/80 bg-surface-container-lowest/60 text-outline text-[11px]">'+
-        '<th class="py-3 px-5 font-semibold">名称</th><th class="py-3 px-4 font-semibold">抖音号</th><th class="py-3 px-4 font-semibold text-center">头像</th>'+
-        '<th class="py-3 px-4 font-semibold">最后一条</th><th class="py-3 px-5 font-semibold text-right">操作</th></tr></thead><tbody class="divide-y divide-surface-container-high/50">';
-      _shown.forEach(c=>{
-        const sid=c.short_id||'';
-        const did=c.douyin_id||c.unique_id||'';
-        const already=sid&&exSids.has(sid);
-        const cname=c.title||c.nickname||'未知';
-        const nonM=(c.chat_state||'')==='non_mutual';
-        const pv=String(c.preview||'').trim();
-        const tip=pv?('最后一条：'+pv+(c.last_time?('（'+c.last_time+'）'):'')):'（抖音会话列表里没有可读内容）';
-        const av=avatarHtml(c.avatar,cname);
-        const btn=already?'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-tertiary bg-tertiary-container/15 border-tertiary-container/30">'+MI('check','text-[12px]')+'已添加</span>'
-          :'<button class="h-7 px-3 rounded bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold active:scale-95 transition-all" '+(sid?'':'disabled')+' data-click="Actions.addContact" data-args="'+esc(sid)+'|'+esc((c.title||c.nickname||'').replace(/'/g,''))+'" data-pass-this="1">添加</button>';
-        html+='<tr class="crow hover:bg-surface-container/50 transition-colors"'+(sid?' data-click="Actions.openContact" data-args="'+esc(sid)+'"':'')+(nonM?' style="opacity:.62"':'')+'>'+
-          '<td class="cname py-3 px-5"><b class="text-on-surface">'+esc(cname)+'</b>'+
-          (nonM?' <span class="inline-flex items-center px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-outline bg-surface-container border-surface-container-high" title="'+esc(tip)+'">非互关</span>':'')+'</td>'+
-          '<td class="cid py-3 px-4 font-mono text-mono-code-sm text-outline">'+esc(did||'—')+'</td>'+
-          '<td class="cav py-3 px-4 text-center">'+av+'</td>'+
-          '<td class="cpv py-3 px-4" title="'+esc(tip)+'"><div class="cpv-t">'+esc(tip)+'</div></td>'+
-          '<td class="cact py-3 px-5 text-right">'+btn+'</td></tr>';
-      });
-      if(!_shown.length)html+='<tr><td colspan="5" class="py-10 text-center text-body-sm text-outline">抓到的会话全是「非互关·从未聊过」的空会话，没有可添加的人</td></tr>';
-      html+='</tbody></table></div>';
-      html+='<div class="px-5 py-3 border-t border-surface-container-high text-body-sm font-body-sm text-outline leading-relaxed">'+MI('info','text-[14px] align-middle mr-1')+'「非互关·从未聊过」= 该会话在抖音聊天列表里没有任何消息，只有一条「对方回复或关注你之前，只能发送一条文字消息」的系统提示（双方未互关），续不了火花，所以默认不显示。</div>';
-      html+='</section>';
-    }
+    /* [v20] 原「添加好友功能条 + 抓取到的联系人」已整体移入 #frAddModal 弹窗，
+       入口是正文顶部工具条的「添加好友」按钮（Actions.openFriendAdd）。 */
 
     /* ---------- 6) 好友操作日志 ---------- */
     html+='<section class="narrowSec bg-surface-container-low border border-surface-container-high rounded-[14px] overflow-hidden">';
-    html+='<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3">'+
-      '<div class="flex items-center gap-3"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface">好友操作日志</h2>'+
-      '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest">增删改台账</span></div>'+
+    html+='<div class="flogHead px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-x-3 gap-y-2">'+
+      '<div class="flex items-center gap-3 shrink-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface whitespace-nowrap">好友操作日志</h2>'+
+      '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest whitespace-nowrap">增删改台账</span></div>'+
       /* [v16.9] 右上角原本直接显示服务器文件路径 panel/data/friend_add.jsonl ——
          对用面板的人没有任何意义（他们不关心日志落在哪个文件），白占标题栏宽度。
-         改成「共 N 条」计数，并补一个筛选（失败/拒绝优先排查）与搜索。 */
+         改成「共 N 条」计数，并补一个筛选（失败/拒绝优先排查）与搜索。
+         [v17.2] 390px 手机上这一行塞不下（标题被挤成「好友/操作/日志」竖排三字），
+         改成 flex-wrap + 筛选栏 w-full：标题独占一行，搜索与筛选另起一行。
+         [v17.3] 换行/整行宽度改由 .flogHead / .flogBar 的媒体查询控制（见 style4.css），
+         这里不再挂 w-full md:w-auto —— Tailwind 那几个类在桌面端会把搜索框拉满整行。 */
       (()=>{const _t=String(App.state._flTab||'全部');
-        return '<div class="drBar" style="justify-content:flex-end">'+
-        '<input id="flSearch" class="drSel" style="width:180px;max-width:none" placeholder="搜索对象或说明…" data-input="_flSearch" value="'+esc(App.state._flQ||'')+'">'+
+        return '<div class="drBar flogBar" style="justify-content:flex-end">'+
+        '<input id="flSearch" class="drSel" style="min-width:110px;max-width:none" placeholder="搜索对象或说明…" data-input="_flSearch" value="'+esc(App.state._flQ||'')+'">'+
         [['全部','全部'],['失败','仅失败']].map(x=>'<button class="drBtn'+( _t===x[0]?' drBtn--pri':'')+'" data-click="_flTab" data-arg="'+esc(x[0])+'">'+esc(x[1])+'</button>').join('')+
-        '<span class="drLb">共 '+fl.logs.length+' 条</span></div>';})()+'</div>';
+        '<span class="drLb hidden sm:inline">共 '+fl.logs.length+' 条</span></div>';})()+'</div>';
     const _q=String(App.state._flQ||'').trim().toLowerCase();
     const _onlyBad=App.state._flTab==='失败';
     const _rows=fl.logs.filter(g=>{
@@ -2511,7 +2441,7 @@ Loaders.friends=async function(){
         html+='<tr class="hover:bg-surface-container/50 transition-colors">'+
           '<td class="lg-t py-2.5 px-5 font-mono text-mono-code-sm text-outline whitespace-nowrap" title="'+esc(_w.full)+'">'+esc(_w.short)+'</td>'+
           '<td class="lg-o py-2.5 px-4 font-mono text-mono-code-sm text-on-surface">'+esc(g.nickname||g.remark||dispTarget(g.input))+'</td>'+
-          '<td class="lg-d py-2.5 px-4 text-body-md font-body-md text-on-surface-variant">'+desc+'</td>'+
+          '<td class="lg-d py-2.5 px-4 text-body-md font-body-md text-on-surface-variant"><div class="lg-dc">'+desc+'</div></td>'+
           '<td class="lg-r py-2.5 px-5 text-right">'+(bTxt?('<span class="inline-flex items-center px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase '+bCls+'">'+bTxt+'</span>'):'')+'</td></tr>';
       });
       html+='</tbody></table></div>';
@@ -2639,13 +2569,10 @@ function _puApply(){
       const chTxt=_ch?_ch.name:'未配置推送通道';
       /* [v16.4] 手机端同理收紧；顺带删掉「状态」行 —— 它和「推送」行讲的是同一件事 */
       const pushTxt=nt.configured?(chTxt+' · '+(nt.enabled!==false?'启用':'停用')+' · '+(nt.daily!==false?'早报':'无早报')):'未配置推送通道';
-      const _wx=u.wx||{};
-      const wxTxt=_wx.bound?(('已绑定 '+_wx.bound+' 个微信')+(_wx.nick?(' · '+_wx.nick):'')):'未绑定微信';
       Sheet._reg('pu',String(i),{
         username:u.username,mine:mine,kindId:kindId,
         role:(u.is_admin?'管理员':'普通用户'),uids:uidTxt,channel:chTxt,on:on,
         daily:!!(nt.configured&&nt.daily!==false),
-        wxTxt:wxTxt,wxBound:_wx.bound||0,wxMasks:(_wx.openids||[]).join(' / '),
         canDel:!!(App.state.isAdmin&&!u.is_admin&&u.username!==App.state.loginUser)});
       const rolePill=u.is_admin
         ?'<span class="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-primary-container/15 text-primary-container border border-primary-container/30 whitespace-nowrap">管理员</span>'
@@ -2653,11 +2580,11 @@ function _puApply(){
       return _mcardHtml('pu',String(i),
         _mcardTitle(esc(u.username)+(mine?'<span style="color:#ff7a45;font-weight:400">（我）</span>':''),esc(kindId)),
         rolePill,
-        [['推送',esc(pushTxt)],['微信',esc(wxTxt)],['抖音号',esc(uidTxt)]]);
+        [['推送',esc(pushTxt)],['抖音号',esc(uidTxt)]]);
     }).join('');
   }
   if(!slice.length){
-    tb.innerHTML='<tr><td colspan="6" class="py-8 text-center text-on-surface-variant text-body-md font-body-md">没有匹配的用户</td></tr>';
+    tb.innerHTML='<tr><td colspan="5" class="py-8 text-center text-on-surface-variant text-body-md font-body-md">没有匹配的用户</td></tr>';
   }else{
     tb.innerHTML=slice.map(u=>_puRow(u,all.indexOf(u))).join('');
   }
@@ -2748,31 +2675,12 @@ function _puRow(u,idx){
   if(amAdmin&&!u.is_admin&&u.username!==App.state.loginUser)
     acts+='<button class="px-2 py-1 text-body-sm text-error hover:bg-error/10 rounded transition-colors" data-click="Actions.panelUserDel" data-arg="'+esc(u.username)+'">删除</button>';
   acts+='</div>';
-  /* [v16.2] 微信绑定：码由管理员在此生成，用户拿去小程序里换绑定；解绑是整账号清空
-     （前端只拿得到脱敏 openid，没法指定解哪一个；实际场景一个账号也就一个微信） */
-  let wxCell='';
-  {
-    const wx=u.wx||{},n=wx.bound||0,masks=(wx.openids||[]);
-    wxCell='<div class="wxCell">'+
-      (n?('<span class="wxPill"><span class="wxDot"></span>已绑定 '+n+' 个微信</span>')
-        :('<span class="wxPillOff"><span class="wxDot off"></span>未绑定</span>'))+
-      (wx.nick?('<span class="wxNick" title="'+esc(wx.nick)+'">'+esc(wx.nick)+'</span>'):'')+
-      (n&&masks.length?('<span class="wxMasked" title="'+esc(masks.join(' / '))+'">'+esc(masks.join(' / '))+'</span>'):'')+
-      (amAdmin&&n?('<div class="wxBtnRow">'+
-        /* [v16.5] 「生成绑定码」入口已撤下（v1.9.5 起「登录即自动绑定」覆盖了本人自助场景：
-           在小程序输一次账号密码就绑上了，管理员不用再生成码、再口头传达）。
-           解绑保留 —— 换绑必须走管理员显式解绑，是有意保留的人工确认，不能一起去掉。
-           后端 /api/panel-users/<u>/wx/bind-code 与小程序 wx-link 页保持可用，
-           团队/代管场景（用户不知道密码、密码由管理员掌握）仍需要绑定码这条路。 */
-        '<button type="button" class="wxBtn danger" data-click="Actions.wxUnbind" data-args="'+esc(u.username)+'|'+n+'" title="解除该账号的全部微信绑定">解绑</button>'+
-        '</div>'):'')+
-      '</div>';
-  }
+  /* [v18.7] 微信绑定列已按需求下线（后端 /api/.../wx/* 接口与小程序绑定流程保留） */
   /* [20261014b] 面板落库头像优先；回退到本浏览器头像库选择 */
   const _paid=avGet('pu',u.username||'');
   const _puUrl=avPanelUrl(u.username||'');
   const _avHtml=_puUrl
-    ?('<img src="'+esc(_puUrl)+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit">')
+    ?('<img src="'+esc(avSrc(_puUrl))+'" alt="" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:inherit">')
     :(_paid?avImgEl(_paid)
            :'<span class="w-full h-full border flex items-center justify-center font-mono-code-sm font-bold text-sm '+AV+'">'+esc((u.username||'?').charAt(0).toUpperCase())+'</span>');
   return '<tr class="hover:bg-surface-container-high/40 transition-colors duration-150">'+
@@ -2788,7 +2696,6 @@ function _puRow(u,idx){
       '</div></div></td>'+
     '<td class="py-3.5 px-3">'+role+'</td>'+
     '<td class="py-3.5 px-3">'+push+'</td>'+
-    '<td class="py-3.5 px-3">'+wxCell+'</td>'+
     '<td class="py-3.5 px-3"><div class="flex flex-col font-mono-code-sm max-w-[150px]">'+
       (amAdmin
         ?(uids.length?('<span class="text-on-surface text-[11px] truncate" title="'+esc(uids.join(', '))+'">'+esc(uids.join(', '))+'</span><span class="text-[10px] text-on-surface-variant">'+uids.length+' 个关联账号</span>')
@@ -2820,19 +2727,6 @@ Loaders.panelusers=async()=>{
 
     /* ---------- 汇总 ---------- */
     const nAdmin=users.filter(u=>u.is_admin).length;
-    const nPush=users.filter(u=>(u.notify||{}).configured).length;
-    const nPushOn=users.filter(u=>{const n=u.notify||{};return n.configured&&n.enabled!==false;}).length;
-    const acc=App.state.accounts||[];
-    const accOk=acc.filter(a=>{const ck=a.cookie||{};return ck.has&&ck.session&&!ck.expired;}).length;
-    const covRate=users.length?Math.round(nPush/users.length*100):0;
-    const POD=(label,icon,val,unit,iconCls,foot)=>'<div class="bg-surface-container-low border border-surface-container-high rounded-xl p-4 flex flex-col justify-between hover:border-primary-container/40 transition-colors duration-150">'+
-      '<div class="flex items-center justify-between text-on-surface-variant">'+
-        '<span class="text-label-uppercase font-label-uppercase tracking-wider">'+label+'</span>'+
-        MI(icon,'text-[18px] '+iconCls)+'</div>'+
-      '<div class="my-2 flex items-baseline gap-2">'+
-        '<span class="text-mono-metric-lg font-mono-metric-lg text-on-surface">'+val+'</span>'+
-        '<span class="text-body-sm font-body-sm text-on-surface-variant">'+unit+'</span></div>'+
-      '<div class="flex items-center justify-between text-body-sm font-body-sm pt-2 border-t border-surface-container-high/60 text-on-surface-variant gap-2">'+foot+'</div></div>';
 
     let html='';
     /* ---------- 页面工具条 ---------- */
@@ -2844,23 +2738,11 @@ Loaders.panelusers=async()=>{
       '</div>';
     html+='</div>';
 
-    /* ---------- 4 Pods ---------- */
-    html+='<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">';
-    html+=POD('总用户数','group',users.length,'位登记账号','text-on-surface-variant',
-      '<span class="text-tertiary flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-tertiary"></span>已启用 '+users.length+'</span><span class="font-mono-code-sm text-[11px] text-on-surface-variant">停用 0</span>');
-    html+=POD('管理员席位','admin_panel_settings',nAdmin,'/ '+users.length+' 已分配','text-primary-container',
-      '<span>普通用户 '+(users.length-nAdmin)+' 位</span><span class="font-mono-code-sm text-[11px] text-on-surface-variant">ROOT_AUTH</span>');
-    html+=POD('推送通道覆盖率','notifications_active',covRate+'%',(nPush<users.length?'需补充':'全覆盖'),(nPush<users.length?'text-amber-400':'text-tertiary'),
-      '<span class="font-mono-code-sm text-[11px]">'+nPushOn+' 个已启用通道</span><span class="text-on-surface-variant font-mono-code-sm text-[11px]">'+(users.length-nPush)+' 待配置</span>');
-    html+=POD('会话安全状态','security',(acc.length&&accOk<acc.length)?'注意':'安全',(accOk<acc.length?'':'0 异常'),(acc.length&&accOk<acc.length)?'text-amber-400':'text-tertiary',
-      '<span class="text-[11px]">'+accOk+' / '+acc.length+' 个账号会话有效</span><span class="font-mono-code-sm text-[11px] text-on-surface-variant">24H 监控</span>');
-    html+='</div>';
-
     /* ---------- 12 栏栅格 ---------- */
     html+='<div class="grid grid-cols-12 gap-5 items-start puGrid">';
 
-    /* ===== 左 8 栏：用户列表卡 ===== */
-    html+='<section id="puListCard" class="col-span-12 lg:col-span-8 bg-surface-container-low border border-surface-container-high rounded-xl flex flex-col overflow-hidden">';
+    /* ===== 用户列表卡（全宽；推送设置与添加用户都收进弹窗） ===== */
+    html+='<section id="puListCard" class="col-span-12 bg-surface-container-low border border-surface-container-high rounded-xl flex flex-col overflow-hidden">';
     html+='<div class="p-4 border-b border-outline-variant/25 flex flex-wrap items-center justify-between gap-3">';
     html+='<div class="flex items-center gap-3 flex-1 min-w-[260px]">';
     html+='<div class="relative w-full max-w-sm">'+
@@ -2874,25 +2756,11 @@ Loaders.panelusers=async()=>{
       '</select></div>';
     html+='</div>';
     html+='<div class="flex items-center gap-2">'+
+      (amAdmin?'<button class="h-8 px-3 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95 flex items-center gap-1" data-click="Actions.puAddOpen" title="添加面板用户">'+MI('add','text-[16px]')+'添加</button>':'')+
       '<span class="text-body-sm font-mono-code-sm text-on-surface-variant" id="puCount">显示 '+users.length+' / '+users.length+' 记录</span>'+
       '<button class="w-8 h-8 border border-outline-variant/30 bg-background hover:bg-surface-container-high text-on-surface-variant rounded-lg transition-colors flex items-center justify-center" title="刷新" data-click="App.refresh">'+MI('refresh','text-[16px]')+'</button>'+
       '</div>';
     html+='</div>';
-
-    /* [v16.2] 微信绑定码横幅：生成后停在卡顶，带秒级倒计时（到点自己收掉，不留过期码在屏幕上）。
-       码本身是后端内存里的一次性凭据，这里只负责展示 + 复制。 */
-    const _wxc=App.state._wxCode;
-    if(amAdmin&&_wxc&&_wxc.user){
-      html+='<div class="wxBindBar" id="wxBindBar">'+
-        MI('qr_code_2','wxBindIc')+
-        '<div class="wxBindTx">小程序绑定码 · 账号「<b>'+esc(_wxc.user)+'</b>」'+
-          '<span class="wxBindHint">在小程序「我的 → 微信绑定」里输入这个码，10 分钟内有效</span></div>'+
-        '<b class="wxBindCode" id="wxBindCode">'+esc(_wxc.code)+'</b>'+
-        '<span class="wxBindLeft" id="wxCodeLeft">--:--</span>'+
-        '<button type="button" class="wxBindCopy" data-click="Actions.wxCodeCopy">复制码</button>'+
-        '<button type="button" class="wxBindX" title="关闭" data-click="Actions.wxCodeClose">'+MI('close','text-[15px]')+'</button>'+
-        '</div>';
-    }
 
     /* [v6.15] 手机端：6 列表格换成卡片（#puCards），点卡片弹层看完整字段与操作 */
     /* [v16.3] 桌面适配：表格加 puTable 类（列宽/换行规则见 style4.css），
@@ -2901,8 +2769,8 @@ Loaders.panelusers=async()=>{
        手机端卡片（mcards）不受影响，仍保留「状态」一行。 */
     html+='<div class="overflow-x-auto msrc-hidden" id="puWrap"><table class="w-full text-left border-collapse puTable">'+
       '<thead><tr class="border-b border-outline-variant/20 bg-background/50 text-label-uppercase font-label-uppercase text-on-surface-variant">'+
-      '<th class="py-3 px-4">用户名 &amp; 账号</th><th class="py-3 px-3">角色权限</th><th class="py-3 px-3">推送通道</th>'+
-      '<th class="py-3 px-3">微信绑定</th>'+
+      '<th class="py-3 px-4">用户名 &amp; 账号</th><th class="py-3 px-3">角色权限</th>'+
+      '<th class="py-3 px-3"><button type="button" class="puTh" data-click="Actions.puPushOpen" title="点击配置推送通道">推送通道'+MI('settings','text-[13px]')+'</button></th>'+
       '<th class="py-3 px-3">关联抖音号</th><th class="py-3 px-4 text-right">操作</th>'+
       '</tr></thead><tbody id="puTbody" class="divide-y divide-outline-variant/15 text-body-md font-body-md"></tbody></table></div>'+
       '<div class="mcards mcards-flush" id="puCards"></div>';
@@ -2912,96 +2780,63 @@ Loaders.panelusers=async()=>{
       '<div class="flex items-center gap-1 font-mono-code-sm" id="puPageBox"></div></div>';
     html+='</section>';
 
-    /* ===== 右 4 栏 ===== */
+    /* ===== 推送通道设置：内容塞进静态弹窗 #puPushBody（点表头「推送通道」打开） ===== */
     const _pc=pc||{};
     const _cfg=_pc.config||{};
-    const _editing=(App.state.pushEdit===true)||!_cfg.channel;
-    html+='<div id="puAside" class="col-span-12 lg:col-span-4 flex flex-col gap-5">';
-
-    /* 卡 1：推送通道说明（WxPusher）+ 当前配置 */
-    html+='<section class="bg-surface-container-low border border-surface-container-high rounded-xl p-5 flex flex-col gap-4" id="pushCard">';
-    html+='<div class="flex items-center justify-between pb-3 border-b border-outline-variant/20 gap-2">'+
-      '<div class="flex items-center gap-2">'+MI('send','text-[20px] text-primary-container')+
-      '<h2 class="text-headline-md font-headline-md text-on-surface text-[15px]">推送通道说明</h2></div>'+
-      '<span class="text-body-sm font-mono-code-sm text-tertiary bg-tertiary/10 px-2 py-0.5 rounded border border-tertiary/25 shrink-0">WxPusher 单用户绑定</span></div>';
-    html+='<p class="text-body-md font-body-md text-on-surface-variant leading-relaxed">绑定用户的微信推送 UID 后，该用户负责的好友断火告警以及每日早报将自动精准投递，无需值守前端。</p>';
-    html+='<div class="flex flex-col gap-1.5">'+
-      '<div class="flex items-center justify-between text-body-sm font-mono-code-sm text-on-surface-variant">'+
-        '<span>通道标识格式 (UID)</span>'+
-        '<button class="text-[10px] text-primary-container hover:underline" data-click="Actions.copyText" data-arg="UID_xxxxxxxxxxxxxxxxxxxxxxxxxxxx">复制格式</button></div>'+
-      '<div class="bg-background border border-outline-variant/30 p-2.5 rounded-lg flex items-center justify-between font-mono-code-sm text-[12px] text-tertiary">'+
-        '<code>UID_xxxxxxxxxxxxxxxxxxxxxxxxxxxx</code>'+
-        '<button class="text-on-surface-variant hover:text-on-surface" title="复制格式" data-click="Actions.copyText" data-arg="UID_xxxxxxxxxxxxxxxxxxxxxxxxxxxx">'+MI('content_copy','text-[15px]')+'</button></div></div>';
-
+    let pushHtml='';
+    pushHtml+='<section class="flex flex-col gap-3.5" id="pushCard">';
     if(amAdmin&&_names.length){
-      html+='<div class="flex items-center gap-2 flex-wrap"><span class="text-body-sm font-body-sm text-on-surface-variant">配置给谁：</span>'+
+      pushHtml+='<div class="flex items-center gap-2 flex-wrap"><span class="text-body-sm font-body-sm text-on-surface-variant">配置给谁：</span>'+
         '<select id="pushTarget" class="h-9 bg-background border border-outline-variant/30 text-body-md font-body-md text-on-surface pl-3 pr-8 rounded-lg focus:border-primary-container outline-none cursor-pointer" data-change="Actions.pushTargetChange" data-pass-this="1">';
-      _names.forEach(n=>{html+='<option value="'+esc(n)+'"'+(n===_tu?' selected':'')+'>'+esc(n)+(n===App.state.loginUser?'（我）':'')+'</option>';});
-      html+='</select></div>';
+      _names.forEach(n=>{pushHtml+='<option value="'+esc(n)+'"'+(n===_tu?' selected':'')+'>'+esc(n)+(n===App.state.loginUser?'（我）':'')+'</option>';});
+      pushHtml+='</select></div>';
     }
     if(_cfg.channel){
-      html+='<div class="text-body-sm font-body-sm text-on-surface-variant leading-relaxed p-3 rounded-lg bg-background border border-outline-variant/25">当前已配置：<b class="text-on-surface">'+esc(_cfg.channel_label||_cfg.channel)+'</b>'+
+      pushHtml+='<div class="text-body-sm font-body-sm text-on-surface-variant leading-relaxed p-3 rounded-lg bg-background border border-outline-variant/25">当前已配置：<b class="text-on-surface">'+esc(_cfg.channel_label||_cfg.channel)+'</b>'+
         ' · '+((_cfg.enabled!==false)?'<span class="text-tertiary">已启用</span>':'<span class="text-error">已停用</span>')+
-        (_cfg.has_token?(' · Token '+esc(_cfg.token_hint||'')):'')+
-        (_cfg.has_webhook?(' · Webhook '+esc(_cfg.webhook_hint||'')):'')+
         ((_cfg.daily!==false)?' · 每天09:00早报开':' · 早报关')+'</div>';
-      html+='<div class="flex items-center gap-1.5 flex-wrap">'+
-        '<button class="h-9 px-3 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95" data-click="Actions.pushEditToggle" data-pass-this="1">'+(_editing?'收起表单':'编辑配置')+'</button>'+
-        '<button class="h-9 px-3 rounded-lg border border-outline-variant/30 bg-background hover:bg-surface-container-high text-on-surface text-body-sm font-medium transition-all" data-click="Actions.pushToggle" data-pass-this="1">'+((_cfg.enabled!==false)?'停用推送':'启用推送')+'</button>'+
-        '<button class="h-9 px-3 rounded-lg border border-outline-variant/30 bg-background hover:bg-surface-container-high text-on-surface text-body-sm font-medium transition-all" data-click="Actions.testPushConfig" data-pass-this="1">发送测试消息</button>'+
-        '<button class="h-9 px-3 rounded-lg border border-error/30 bg-error/10 hover:bg-error/20 text-error text-body-sm font-medium transition-all" data-click="Actions.clearPushConfig" data-pass-this="1">删除配置</button>'+
-        '<span class="text-body-sm font-body-sm text-on-surface-variant" id="pushTip"></span></div>';
     }else{
-      html+='<div class="text-body-sm font-body-sm text-on-surface-variant leading-relaxed p-3 rounded-lg bg-background border border-outline-variant/25">尚未配置推送通道 —— 在下面选择通道、填好密钥并保存即可。'+((_pc.global_configured)?'（管理员已在全局 .env 配过备用通道，未配置时会用它兜底）':'')+'</div>';
+      pushHtml+='<div class="text-body-sm font-body-sm text-on-surface-variant leading-relaxed p-3 rounded-lg bg-background border border-outline-variant/25">尚未配置推送通道</div>';
     }
 
-    if(_editing){
-      html+='<div class="flex flex-col gap-2.5">';
-      html+='<select id="pushChannel" class="h-9 bg-background border border-outline-variant/30 text-body-md font-body-md text-on-surface pl-3 pr-8 rounded-lg focus:border-primary-container outline-none cursor-pointer">';
-      ((_pc.channels)||[{value:'',label:'关闭'}]).forEach(c=>{
-        html+='<option value="'+esc(c.value)+'"'+((c.value||'')===(_cfg.channel||'')?' selected':'')+'>'+esc(c.label)+'</option>';
-      });
-      html+='</select>';
-      html+='<input id="pushToken" class="h-9 px-3 rounded-lg bg-background border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline outline-none focus:border-primary-container transition-colors" placeholder="Token：WxPusher appToken / pushplus token'+(_cfg.has_token?('（已存 '+esc(_cfg.token_hint)+'）'):'')+'">';
-      html+='<input id="pushWebhook" class="h-9 px-3 rounded-lg bg-background border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline outline-none focus:border-primary-container transition-colors" placeholder="Webhook：WxPusher UID / 企业微信 / Bark'+(_cfg.has_webhook?('（已存 '+esc(_cfg.webhook_hint)+'）'):'')+'">';
-      html+='<label class="text-body-sm font-body-sm text-on-surface-variant flex items-center gap-2"><input type="checkbox" id="pushEnabled"'+(_cfg.enabled!==false?' checked':'')+'> 启用推送</label>';
-      html+='<label class="text-body-sm font-body-sm text-on-surface-variant flex items-center gap-2"><input type="checkbox" id="pushDaily"'+(_cfg.daily!==false?' checked':'')+'> 每天 09:00 推早报</label>';
-      html+='<div class="flex items-center gap-1.5 flex-wrap">'+
-        '<button class="h-9 px-3.5 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95" data-click="Actions.savePushConfig" data-pass-this="1">保存</button>'+
-        '<button class="h-9 px-3 rounded-lg border border-outline-variant/30 bg-background hover:bg-surface-container-high text-on-surface text-body-sm font-medium transition-all" data-click="Actions.testPushConfig" data-pass-this="1">发送测试消息</button>'+
-        (_cfg.channel?'<button class="h-9 px-3 rounded-lg border border-error/30 bg-error/10 hover:bg-error/20 text-error text-body-sm font-medium transition-all" data-click="Actions.clearPushConfig" data-pass-this="1">删除配置</button>':'')+
-        '<span class="text-body-sm font-body-sm text-on-surface-variant" id="pushTip"></span></div>';
-      html+='<div class="text-[11px] text-on-surface-variant leading-relaxed p-2.5 rounded-lg bg-background border border-outline-variant/20">'+
-        '通道怎么填：<b class="text-on-surface">WxPusher</b> = wxpusher.zjiecode.com 创建应用拿 appToken 填 Token、扫码关注后拿 UID 填 Webhook（推荐）；'+
-        '<b class="text-on-surface">微信 ClawBot</b> = pushplus 绑定后拿到的 token；<b class="text-on-surface">企业微信机器人</b> = 群机器人 Webhook；'+
-        '<b class="text-on-surface">Server酱</b> = SCT 开头的 token；<b class="text-on-surface">Bark</b> = https://api.day.app/你的key。'+
-        '密钥只显示前后几位，输入框留空表示不修改已保存的值。</div>';
-      html+='</div>';
-    }
-    html+='</section>';
+    pushHtml+='<div class="flex flex-col gap-2.5">';
+    pushHtml+='<select id="pushChannel" class="h-9 bg-background border border-outline-variant/30 text-body-md font-body-md text-on-surface pl-3 pr-8 rounded-lg focus:border-primary-container outline-none cursor-pointer">';
+    ((_pc.channels)||[{value:'',label:'关闭'}]).forEach(c=>{
+      pushHtml+='<option value="'+esc(c.value)+'"'+((c.value||'')===(_cfg.channel||'')?' selected':'')+'>'+esc(c.label)+'</option>';
+    });
+    pushHtml+='</select>';
+    pushHtml+='<input id="pushToken" class="h-9 px-3 rounded-lg bg-background border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline outline-none focus:border-primary-container transition-colors" placeholder="Token：WxPusher appToken / pushplus token'+(_cfg.has_token?('（已存）'):'')+'">';
+    pushHtml+='<input id="pushWebhook" class="h-9 px-3 rounded-lg bg-background border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline outline-none focus:border-primary-container transition-colors" placeholder="Webhook：企业微信 / Bark'+(_cfg.has_webhook?('（已存）'):'')+'">';
+    pushHtml+='<div class="flex items-center gap-4 flex-wrap">'+
+      '<label class="text-body-sm font-body-sm text-on-surface-variant flex items-center gap-2"><input type="checkbox" id="pushEnabled"'+(_cfg.enabled!==false?' checked':'')+'> 启用推送</label>'+
+      '<label class="text-body-sm font-body-sm text-on-surface-variant flex items-center gap-2"><input type="checkbox" id="pushDaily"'+(_cfg.daily!==false?' checked':'')+'> 每天 09:00 推早报</label></div>';
+    pushHtml+='<div class="flex items-center gap-1.5 flex-wrap">'+
+      '<button class="h-9 px-3.5 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95" data-click="Actions.savePushConfig" data-pass-this="1">保存</button>'+
+      '<button class="h-9 px-3 rounded-lg border border-outline-variant/30 bg-background hover:bg-surface-container-high text-on-surface text-body-sm font-medium transition-all" data-click="Actions.testPushConfig" data-pass-this="1">发送测试消息</button>'+
+      (_cfg.channel?'<button class="h-9 px-3 rounded-lg border border-error/30 bg-error/10 hover:bg-error/20 text-error text-body-sm font-medium transition-all" data-click="Actions.clearPushConfig" data-pass-this="1">删除配置</button>':'')+
+      '<span class="text-body-sm font-body-sm text-on-surface-variant" id="pushTip"></span></div>';
+    pushHtml+='</div>';
+    pushHtml+='</section>';
 
-    /* [v6.2] 「登录安全与账号会话」卡按用户要求移除 */
+    html+='</div>'; /* /栅格 */
 
-    html+='</div>'; /* /右栏 */
-
-    /* [v6.8] 添加面板用户：放进栅格与左侧用户列表卡同宽对齐（col-span-8），不再居中窄条
-       保留 v3 id 契约：puName / puPass / puAcc / puAdmin */
+    /* ===== 添加面板用户：内容塞进静态弹窗 #puAddBody（列表卡右上角「添加」打开）
+       保留 v3 id 契约：puName / puPass / puAcc / puAdmin ===== */
+    let addHtml='';
     if(amAdmin){
-      html+='<section id="addUserBox" class="col-span-12 lg:col-span-8 p-5 rounded-xl bg-surface-container-low border border-outline-variant/25 flex flex-col gap-2.5">'+
-        '<div class="flex items-center gap-2"><span class="text-headline-md font-headline-md text-[15px] font-semibold text-on-surface">添加面板用户</span>'+
-        '<span class="font-mono-code-sm text-mono-code-sm px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/40">admin only</span></div>'+
-        '<input id="puName" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline outline-none focus:border-primary-container transition-colors" placeholder="用户名">'+
+      addHtml='<input id="puName" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline outline-none focus:border-primary-container transition-colors" placeholder="用户名">'+
         '<input id="puPass" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline outline-none focus:border-primary-container transition-colors" type="password" placeholder="密码">'+
         '<input id="puAcc" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline outline-none focus:border-primary-container transition-colors" placeholder="关联抖音号(逗号分隔多个)">'+
         '<label class="text-body-sm font-body-sm text-on-surface-variant flex items-center gap-2"><input type="checkbox" id="puAdmin"> 设为管理员</label>'+
-        '<button class="h-9 px-3.5 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95" data-click="Actions.panelUserAdd">添加用户</button>'+
-        '<div class="text-[11px] text-on-surface-variant leading-relaxed">管理员可添加/删除用户、修改密码，并代为配置推送；普通用户只能改自己的密码与通知。</div>'+
-        '</section>';
+        '<div class="flex items-center gap-2">'+
+          '<button class="h-9 px-3.5 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95" data-click="Actions.panelUserAdd">添加用户</button>'+
+          '<button class="h-9 px-3 rounded-lg border border-outline-variant/30 bg-background hover:bg-surface-container-high text-on-surface text-body-sm font-medium transition-all" data-click="Actions.puAddClose">取消</button></div>'+
+        '<div class="text-[11px] text-on-surface-variant leading-relaxed">管理员可添加/删除用户、修改密码，并代为配置推送；普通用户只能改自己的密码与通知。</div>';
     }
-    html+='</div>'; /* /栅格 */
-
 
     ensureView('panelusers').innerHTML=html;
+    const _pb=document.getElementById('puPushBody');if(_pb)_pb.innerHTML=pushHtml;
+    const _ab=document.getElementById('puAddBody');if(_ab)_ab.innerHTML=addHtml;
     _puApply();
     _hdrPanelUsers((App.state._puAll||[]).length);
   }catch(e){if(e.message!=='unauthorized')viewError('panelusers',e);}
@@ -3019,9 +2854,10 @@ Loaders.accounts=async(live)=>{
       const saved=localStorage.getItem('current_account');
       App.state.currentAccount=(saved&&acc.find(a=>a.unique_id===saved))?.unique_id||acc[0]?.unique_id||null;
     }
+    /* [v21] 四件套挂在侧栏/「我的」页，#accSwitch 不保证存在 → 判空后再设置 */
     const sw=document.getElementById('accSwitch');
-    if(acc.length>0){sw.style.display='flex';App.updateAccSwitcher();App.updateSidebar();}
-    else{sw.style.display='none';}
+    if(sw)sw.style.display=acc.length>0?'flex':'none';
+    if(acc.length>0){App.updateAccSwitcher();App.updateSidebar();}
 
     /* ---------- 会话状态判定（v3 语义 → Stitch 配色 tone） ---------- */
     const _stOf=a=>{
@@ -3056,13 +2892,6 @@ Loaders.accounts=async(live)=>{
       if(_af==='bad')return s==='bad'||s==='exp'||s==='nos';
       return s==='chk'||s==='none';});
 
-    /* ---------- 汇总指标 ---------- */
-    const _sumTgt=acc.reduce((s,a)=>s+((a.targets||[]).length),0);
-    const _sumCk=acc.reduce((s,a)=>s+(((a.cookie||{}).count)||0),0);
-    const _badCk=acc.filter(a=>((a.cookie||{}).parse_err)).length;
-    const _okRate=acc.length?Math.round(_ac.ok/acc.length*100):0;
-    const _maxTgt=Math.max(1,Math.max.apply(null,[1].concat(acc.map(a=>(a.targets||[]).length))));
-
     /* tone → 样式 */
     const TONE={
       /* [v5.5 收敛绿] 状态色只留在胶囊+圆点；头像框/说明文字回归中性（用户反馈全绿太难看） */
@@ -3077,30 +2906,14 @@ Loaders.accounts=async(live)=>{
     };
     const BTN='h-8 px-2.5 rounded-lg border border-outline-variant/30 bg-surface-container hover:bg-surface-container-high text-on-surface text-body-sm font-medium transition-all active:scale-95';
 
-    /* ---------- 0) [v16.3] 新增账号录入条 —— 按要求挪到**页面最上方** ----------
-       原来在最底部（加账号要先滚到页尾）。现在是视图的第一个子元素，位置在
-       「工具条」之上、栅格之外 —— 于是它横向整宽，和栅格里的列表卡同宽对齐。
-       id 契约不变：addAccUid / addAccName / Actions.addAccount。
-       桌面端把「标题 + 输入 + 按钮」压成一行（见 style4.css [v16.3] 的 #addAccBox）。 */
-    let html='<div id="addAccBox" class="p-4 rounded-2xl bg-surface-container-low border border-outline-variant/25 flex flex-col gap-3">'+
-      '<div class="flex items-center gap-2"><span class="text-headline-md font-headline-md text-[15px] font-semibold text-on-surface">新增账号</span>'+
-      '<span class="font-mono-code-sm text-mono-code-sm px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/40">unique_id</span></div>'+
-      '<div class="flex items-center gap-2 flex-wrap">'+
-        '<input id="addAccUid" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline-variant focus:border-primary-container outline-none transition-colors" placeholder="新账号抖音号 unique_id" style="width:210px">'+
-        '<input id="addAccName" class="h-9 px-3 rounded-lg bg-surface-container border border-outline-variant/30 text-on-surface text-body-sm placeholder-outline-variant focus:border-primary-container outline-none transition-colors" placeholder="备注名（可选）" style="width:160px">'+
-        '<button class="h-9 px-3.5 rounded-lg bg-primary-container hover:bg-secondary text-white text-body-sm font-semibold transition-all active:scale-95" data-click="Actions.addAccount">添加账号</button>'+
-      '</div>'+
-      '<div class="text-[11px] text-on-surface-variant leading-relaxed">多账号时按 TASKS 逐个执行；写操作前自动备份 .env。添加后需导入 cookie 或扫码登录才能参与续火花。</div>'+
-      '</div>';
+    /* ---------- 0) [v21] 「新增账号」录入条收进弹窗（#accAddModal） ----------
+       用户要求：模块只保留一个「添加」按钮，放在「已绑定的抖音账号」卡头右侧，
+       点开弹窗填写 unique_id / 备注名。id 契约不变：addAccUid / addAccName / Actions.addAccount。 */
+    let html='';
 
-    /* ---------- 页面工具条（Stitch 04 稿 header 右侧 + 副标题） ---------- */
-    html+='<div class="flex items-center justify-between gap-3 flex-wrap">';
-    html+='<div class="flex items-center gap-3 min-w-0">'+
-      '<span class="text-body-sm font-body-sm text-on-surface-variant">共 <b class="text-on-surface">'+acc.length+'</b> 个账号 · 登录态每轮任务前校验</span>'+
-      '<span class="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-surface-container-low border border-outline-variant/20 font-mono-code-sm text-mono-code-sm text-on-surface-variant">'+
-        '<span class="w-2 h-2 rounded-full bg-tertiary"></span><span>数据每 6 小时自动抓取 · 最近抓取 06:00</span></span>'+
-      '</div>';
-    html+='</div>';
+    /* ---------- 页面工具条 ----------
+       [v21] 「共 N 个账号」与「数据每 6 小时自动抓取」两条小字按用户此前要求整块删除
+       （总数在下方卡头药丸里，抓取是后台行为，不必在正文重复）。 */
 
     /* ---------- 12 栏栅格 ---------- */
     html+='<div class="grid grid-cols-12 gap-5 items-start">';
@@ -3108,13 +2921,15 @@ Loaders.accounts=async(live)=>{
     /* ===== 左 8 栏 ===== */
     html+='<div class="col-span-12 flex flex-col gap-5">';
 
-    /* [v16.3] 「新增账号录入条」原在此处（本栏最底），已整块上移到视图最前面（上面的 0)） */
+    /* [v21] 「新增账号录入条」已改为卡头「添加」+ #accAddModal 弹窗 */
 
     /* 1) 筛选条 */
     html+='<div class="flex items-center justify-between gap-3 flex-wrap bg-surface-container-low p-3.5 rounded-2xl border border-outline-variant/25">';
-    html+='<div class="flex items-center gap-2">'+
-      '<span class="text-headline-md font-headline-md text-[15px] font-semibold text-on-surface">已绑定的抖音账号</span>'+
-      '<span class="font-mono-code-sm text-mono-code-sm px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/40">'+acc.length+'</span></div>';
+    html+='<div class="flex items-center gap-2 min-w-0">'+
+      '<span class="text-headline-md font-headline-md text-[15px] font-semibold text-on-surface whitespace-nowrap">已绑定的抖音账号</span>'+
+      '<span class="font-mono-code-sm text-mono-code-sm px-2 py-0.5 rounded-full bg-surface-container-high text-on-surface-variant border border-outline-variant/40">'+acc.length+'</span>'+
+      '<button class="h-8 px-3 rounded-lg bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold flex items-center gap-1 active:scale-95 transition-all shrink-0" data-click="Actions.openAddAcc">'+MI('add','text-[16px]',1)+'添加</button>'+
+      '</div>';
     const _seg=(k,t,dotCls)=>'<button type="button" class="px-2.5 py-1 rounded-md text-body-sm font-medium transition-colors flex items-center gap-1 '+
       (_af===k?'bg-surface-container text-primary-container border border-primary-container/30':'text-on-surface-variant hover:text-on-surface hover:bg-surface-container')+
       '" data-click="Actions.accFilter" data-args="'+k+'">'+
@@ -3129,7 +2944,7 @@ Loaders.accounts=async(live)=>{
 
     /* 2) 账号行列表 */
     if(!acc.length){
-      html+='<div class="p-8 text-center rounded-2xl bg-surface-container-low border border-outline-variant/25 text-on-surface-variant text-body-md font-body-md">暂无账号，请在上方「新增账号」里添加（抖音号 unique_id）</div>';
+      html+='<div class="p-8 text-center rounded-2xl bg-surface-container-low border border-outline-variant/25 text-on-surface-variant text-body-md font-body-md">暂无账号，点右上角「添加」新增（抖音号 unique_id）</div>';
     }else if(!_alist.length){
       html+='<div class="p-8 text-center rounded-2xl bg-surface-container-low border border-outline-variant/25 text-on-surface-variant text-body-md font-body-md">当前筛选条件下没有账号</div>';
     }else{
@@ -3206,7 +3021,7 @@ Loaders.accounts=async(live)=>{
       html+='</div>';
     }
 
-    /* 3) 巡检横幅 + 3 指标 pod */
+    /* 3) 巡检横幅（[2026-11-24] 原「3 指标 pod」按用户要求移除） */
     html+='<div class="flex flex-col gap-3">';
     html+='<div class="p-3 px-4 rounded-xl bg-surface-container-high/60 border border-outline-variant/25 flex items-center justify-between text-body-sm font-body-sm gap-3 flex-wrap">'+
       '<div class="flex items-center gap-2 text-on-surface-variant">'+
@@ -3219,29 +3034,14 @@ Loaders.accounts=async(live)=>{
         '<span>立即全量校验</span>'+MI('arrow_forward','text-[14px]')+'</button>'+
       '</div>';
 
-    html+='<div class="grid grid-cols-3 gap-3">';
-    const POD=(label,icon,val,unit,foot)=>'<div class="p-3.5 rounded-2xl bg-surface-container-low border border-outline-variant/30 flex flex-col justify-between">'+
-      '<div class="flex items-center justify-between text-on-surface-variant">'+
-        '<span class="text-label-uppercase font-label-uppercase tracking-wider">'+label+'</span>'+
-        MI(icon,'text-[16px] text-primary-container')+'</div>'+
-      '<div class="my-2"><div class="text-mono-metric-lg font-mono-metric-lg font-bold text-on-surface">'+val+' <span class="text-body-md font-body-md font-normal text-on-surface-variant">'+unit+'</span></div></div>'+
-      '<div class="flex items-center gap-1 text-[11px] text-on-surface-variant">'+foot+'</div></div>';
-    html+=POD('账号在线率',_ac.bad?'warning':'insights',_okRate,'%',
-      MI(_ac.ok?'trending_up':'warning','text-[13px] '+(_ac.ok?'text-on-surface-variant':'text-error'))+
-      '<span>'+_ac.ok+' 个在线 · '+_ac.bad+' 个失效</span>');
-    html+=POD('关联火花目标','local_fire_department',_sumTgt,'位',
-      '<span class="font-mono-code-sm text-on-surface-variant">覆盖 '+acc.length+' 个账号</span><span>· 单账号最多 '+_maxTgt+' 位</span>');
-    html+=POD('Cookie 健康度',_badCk?'error':'shield',_badCk?'异常':'正常','',
-      MI(_badCk?'error':'verified_user','text-[13px] '+(_badCk?'text-error':'text-on-surface-variant'))+
-      '<span>共 '+_sumCk+' 条 cookie'+(_badCk?(' · '+_badCk+' 个账号解析异常'):' · 全部解析正常')+'</span>');
-    html+='</div></div>';
+    html+='</div>';
 
     /* [v16.3] 原「4) 新增账号录入条」已整块上移到本栏最前面（见上面的 0)） */
     html+='</div>'; /* /左 8 栏 */
     html+='</div>'; /* /栅格 */
 
     ensureView('accounts').innerHTML=html;
-    _hdrAccounts();
+    /* [v21] 顶栏副标题（#hdrAcSub）已删除，不再调用 _hdrAccounts() */
     /* [新增20261002] 首屏用「未校验」的快速数据，这里后台把登录状态补成真值 */
     if(!live)App.refreshAccountStatus();
   }catch(e){if(e.message!=='unauthorized')viewError('accounts',e);}
@@ -3407,20 +3207,31 @@ const Actions={
     }catch(e){if(tip)tip.textContent='保存失败：'+e.message;}
     finally{if(btn)btn.disabled=false;}
   },
-  /* 通知设置：展开/收起编辑表单 */
-  pushEditToggle:async(btn)=>{
-    App.state.pushEdit=!(App.state.pushEdit===true);
+  /* [v18.7] 推送设置收进弹窗：点表头「推送通道」或行内「通知设置」打开 */
+  puPushOpen:async()=>{
     await Loaders.panelusers();
-    const el=document.getElementById('pushCard');
-    if(el&&el.scrollIntoView)el.scrollIntoView({behavior:'smooth',block:'start'});
+    const m=document.getElementById('puPushModal');
+    if(m)m.style.display='flex';
   },
-  /* 从用户列表点「通知设置」：切到该用户并展开表单 */
+  puPushClose:()=>{
+    const m=document.getElementById('puPushModal');
+    if(m)m.style.display='none';
+  },
+  puAddOpen:()=>{
+    const m=document.getElementById('puAddModal');
+    if(m)m.style.display='flex';
+  },
+  puAddClose:()=>{
+    const m=document.getElementById('puAddModal');
+    if(m)m.style.display='none';
+  },
+  /* 兼容旧入口：展开编辑表单 → 现在等价于打开弹窗 */
+  pushEditToggle:async()=>{await Actions.puPushOpen();},
+  /* 从用户列表点「通知设置」：切到该用户并打开弹窗 */
   pushEditUser:async(username)=>{
     if(!App.state.isAdmin&&username!==App.state.loginUser){toast('无权操作','只能配置自己的通知','err');return;}
-    App.state.pushUser=username;App.state.pushEdit=true;
-    await Loaders.panelusers();
-    const el=document.getElementById('pushCard');
-    if(el&&el.scrollIntoView)el.scrollIntoView({behavior:'smooth',block:'start'});
+    App.state.pushUser=username;
+    await Actions.puPushOpen();
   },
   /* 通知设置卡片里的一键启用/停用 */
   pushToggle:async(btn)=>{
@@ -3491,7 +3302,7 @@ const Actions={
     const adm=document.getElementById('puAdmin').checked;
     if(!name||!pass){toast('请填写用户名和密码','','err');return;}
     try{const r=await api('/api/panel-users',{method:'POST',body:{username:name,password:pass,account_uids:accs,is_admin:adm}});
-      if(r.ok){toast('已添加用户',name,'ok');Loaders.panelusers();}
+      if(r.ok){toast('已添加用户',name,'ok');Actions.puAddClose();Loaders.panelusers();}
       else toast('添加失败',r.error||'','err');
     }catch(e){toast('添加失败',e.message,'err');}
   },
@@ -3768,6 +3579,22 @@ const Actions={
       toast('已复制',txt,'ok');
     }catch(e){toast('复制失败','请长按手动复制','err');}
   },
+/* [v20] 添加好友弹窗：好友页工具条「添加好友」打开；正文由 _frAddBodyHtml 生成 */
+  openFriendAdd(){
+    const m=document.getElementById('frAddModal');if(!m)return;
+    const b=document.getElementById('frAddBody');
+    if(b)b.innerHTML=_frAddBodyHtml();
+    m.style.display='flex';
+    /* 首次打开且还没抓过：补拉一次已抓取联系人，结果回来后再画一遍 */
+    if(App.state.scrapedContacts===null){
+      api(App.withAcc('/api/scraped-contacts')).then(sc=>{
+        if(sc&&sc.contacts&&sc.contacts.length)App.state.scrapedContacts=sc.contacts;
+        _frAddRender();
+      }).catch(()=>{});
+    }
+    setTimeout(()=>{const i=document.getElementById('addUid');if(i&&window.innerWidth>767)i.focus();},60);
+  },
+  closeFriendAdd(){const m=document.getElementById('frAddModal');if(m)m.style.display='none';},
   async addFriend(btn){
     const inp=document.getElementById('addUid');const v=(inp.value||'').trim();
     const md=(document.getElementById('addMode')||{}).value||'uid';
@@ -3778,7 +3605,7 @@ const Actions={
       if(r.ok){inp.value='';toast('已添加',(r.env_sync&&r.env_sync.ok?'已同步 .env':'')+' '+(r.note||''),'ok');}
       else toast('添加失败',r.error||'','err');
     }catch(e){toast('添加失败',e.message,'err');}
-    finally{done();Loaders.friends();}
+    finally{done();Loaders.friends().then(_frAddRender);}
   },
   async removeFriend(sid,name,btn){
     if(!confirm('确认将「'+name+'」移出自动续火花名单？\n该操作会同步从 .env 的 TASKS 名单删除（写前自动备份）。'))return;
@@ -3857,6 +3684,39 @@ Actions.syncSchedMsgLabel=()=>{
     hint.textContent='发送内容：'+(tpl?tpl.replace(/\n/g,' ⏎ '):'今日火花 + 每日一言')+'（想固定内容就选「自定义话术」）';
   }
 };
+/* [2026-11-24] 顶栏「添加」：以弹窗形式打开「新增定时任务」表单（正文动态构建到 #tfBody） */
+Actions.openTaskForm=()=>{
+  const accs=App.state.accounts||[];
+  if(!accs.length){toast('暂无抖音号','请先在「抖音账号」页添加账号后再创建任务');return;}
+  const box=document.getElementById('tfBody');
+  const m=document.getElementById('tfModal');
+  if(!box||!m)return;
+  let h='';
+  h+='<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-3">';
+  h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">抖音号</label><select id="newTaskAcc" class="dark-input" style="width:100%" data-change="Actions.onSchedAccChange">';
+  for(const a of accs)h+='<option value="'+esc(a.unique_id)+'"'+(a.unique_id===App.state.currentAccount?' selected':'')+'>'+esc(a.username)+' ('+esc(a.unique_id)+')</option>';
+  h+='</select></div>';
+  h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">任务类型</label><select id="newTaskType" class="dark-input" style="width:100%" data-change="Actions.onSchedTypeChange"><option value="main">批量续（所有目标好友）</option><option value="custom">单独续（指定好友）</option></select></div>';
+  h+='<div id="targetRow" class="off" style="display:none"><label class="text-body-sm font-body-sm text-outline block mb-1">目标好友</label><select id="newTaskTarget" class="dark-input" style="width:100%"><option value="">加载中...</option></select></div>';
+  h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">执行时间</label><div class="flex items-center gap-2"><input type="number" id="newTaskHour" value="0" min="0" max="23" class="dark-input" style="width:72px"> 时 <input type="number" id="newTaskMinute" value="10" min="0" max="59" class="dark-input" style="width:72px"> 分</div></div>';
+  h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">随机延迟（分钟）</label><input type="number" id="newTaskDelay" value="0" min="0" max="720" class="dark-input" style="width:110px"></div>';
+  h+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">发送话术</label><select id="newTaskMsgMode" class="dark-input" style="width:100%" data-change="Actions.onSchedMsgModeChange"><option id="newTaskMsgModeDefault" value="template">今日火花 + 每日一言</option><option value="custom">自定义话术</option></select>';
+  h+='<div class="text-body-sm text-outline mt-1" id="newTaskMsgHint"></div></div>';
+  h+='<div id="newTaskMsgRow" class="off lg:col-span-2" style="display:none"><label class="text-body-sm font-body-sm text-outline block mb-1">自定义话术</label><textarea id="newTaskMsg" class="dark-input" rows="2" style="width:100%;resize:vertical" placeholder="输入要发送的话，例如：睡了吗？[二哈]（留空则用「今日火花 + 每日一言」）"></textarea></div>';
+  h+='</div>';
+  h+='<div class="mt-4 pt-3 border-t border-surface-container-high/60"><button class="h-9 px-4 rounded-lg bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold flex items-center gap-1.5 active:scale-95 transition-all" data-click="Actions.addSchedTask">'+MI('add','text-[17px]')+'添加任务</button></div>';
+  box.innerHTML=h;
+  m.style.display='flex';
+  Actions.syncSchedMsgLabel();
+  const s=document.getElementById('newTaskAcc');
+  if(s&&s.focus)s.focus({preventScroll:true});
+};
+Actions.closeTaskForm=()=>{
+  const m=document.getElementById('tfModal');
+  if(m)m.style.display='none';
+  const b=document.getElementById('tfBody');
+  if(b)b.innerHTML='';
+};
 Actions.addSchedTask=async()=>{
   const body={
     account_uid:document.getElementById('newTaskAcc').value,
@@ -3878,7 +3738,7 @@ Actions.addSchedTask=async()=>{
   body.description=(body.type==='main'?'批量续('+body.account_uid+')':'单独续('+body.target+')')+(body.msg?' · 话术:'+body.msg:'');
   try{
     const r=await api('/api/schedule/tasks',{method:'POST',body});
-    if(r.ok){toast('已添加','定时任务已创建','ok');Loaders.tasks();}
+    if(r.ok){Actions.closeTaskForm();toast('已添加','定时任务已创建','ok');Loaders.tasks();}
     else{toast('添加失败',r.error||'','err');}
   }catch(e){toast('添加失败',e.message,'err');}
 };
@@ -4049,19 +3909,24 @@ Loaders.tasks=async function(_poll){
 
 
     /* [v6.11] 交互台（批量续/单独续两个框）按用户要求移除；
-       批量续走总览「立即续火花」与好友页「批量一键续火」，单独续走好友页行内闪电按钮。 */
+       批量续走好友页「批量一键续火」，单独续走好友页行内闪电按钮。 */
     let html='';
 
     /* ---------- 2) 定时任务 ---------- */
     /* [20261017] 原这里的 schedIsAdmin 只服务于下面那块 crontab（仅管理员可见），
        展示删除后成为未使用变量，一并去掉。 */
     html+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] overflow-hidden shadow-sm">';
-    html+='<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3 flex-wrap">'+
-      '<div class="flex items-center gap-3 min-w-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface shrink-0">定时任务列表</h2>'+
-      '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest shrink-0">'+schedTasks.length+' 条 · '+(_curAcc?esc(_curAcc.username):'全部账号')+'</span></div>'+
-      '<div class="flex items-center gap-2">'+
-      '<span class="hidden md:flex items-center gap-1 text-body-sm font-body-sm text-outline">'+MI('info','text-[15px]')+'仅列出当前选中账号的任务</span>'+
-      '<button class="h-8 px-3 rounded bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors" data-click="App.refresh">'+MI('refresh','text-[16px]')+'刷新</button>'+
+    /* [v17.2] 用户反馈：「定时任务列表」和「刷新」跨行。原容器带 flex-wrap，
+       标题 + 账号药丸一长，右侧那组（提示语 + 刷新）就被整体顶到第二行。
+       现在不换行：左侧 min-w-0 + 文字可截断，右侧 shrink-0。
+       [v21] 提示语已删；「添加」从页面工具条挪到卡头，与「刷新」并列。 */
+    html+='<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3 flex-nowrap">'+
+      '<div class="flex items-center gap-3 min-w-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface shrink-0 whitespace-nowrap">定时任务列表</h2>'+
+      '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest overflow-hidden text-ellipsis whitespace-nowrap">'+schedTasks.length+' 条 · '+(_curAcc?esc(_curAcc.username):'全部账号')+'</span></div>'+
+      /* [v21] 「仅列出当前选中账号的任务」提示删除；「添加」从页面工具条挪到卡头，与「刷新」并列 */
+      '<div class="flex items-center gap-2 shrink-0">'+
+      '<button class="h-8 px-3 rounded-lg bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold flex items-center gap-1 active:scale-95 transition-all shrink-0 whitespace-nowrap" data-click="Actions.openTaskForm">'+MI('add','text-[16px]',1)+'添加</button>'+
+      '<button class="h-8 px-3 rounded bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors shrink-0 whitespace-nowrap" data-click="App.refresh">'+MI('refresh','text-[16px]')+'刷新</button>'+
       '</div></div>';
     if(schedTasks.length){
       /* [v6.15] 手机上这张 10 列表格（min-width 860px）要左右滑才能看全 →
@@ -4120,41 +3985,14 @@ Loaders.tasks=async function(_poll){
       html+='</tbody></table></div>';
       /* [v6.15] 手机卡片列表（>767px 由 CSS 整块隐藏） */
       html+='<div class="mcards">'+_schedCards+'</div>';
-      html+='<div class="px-5 py-3 border-t border-surface-container-high text-body-sm font-body-sm text-outline leading-relaxed">'+MI('info','text-[14px] align-middle mr-1')+'「执行」= 立即跑一次（不加随机延迟），结果与定时触发完全一致，可在本页下方运行日志查看。带 * 的结果来自早期未记录账号的历史记录，匹配可能不精确。<span class="md:hidden">手机上点任意一条可看完整字段与操作。</span></div>';
+      /* [v17.2] 用户要求：删掉表下方那整段灰色说明（「执行」= 立即跑一次…共 3 句小字）。
+         按钮本身就是「执行」，点一次就知道是什么；说明只会把卡片撑长。 */
     }else{
-      html+='<div class="py-12 text-center text-body-sm text-outline">'+(_curAcc?('「'+esc(_curAcc.username)+'」暂无定时任务，可在下方添加'):'暂无定时任务，在下方添加')+'</div>';
+      html+='<div class="py-12 text-center text-body-sm text-outline">'+(_curAcc?('「'+esc(_curAcc.username)+'」暂无定时任务，点本卡右上角「添加」创建'):'暂无定时任务，点本卡右上角「添加」创建')+'</div>';
     }
     html+='</section>';
 
-    /* ---------- 3) 新增定时任务（默认收起，点标题栏展开） ---------- */
-    const _accs=App.state.accounts||[];
-    if(_accs.length){
-      const _tfO=!!App.state._tfOpen;
-      html+='<section class="bg-surface-container-low border border-surface-container-high rounded-[14px] shadow-sm overflow-hidden">';
-      html+='<div class="flex items-center justify-between gap-3 px-4 py-3" style="cursor:pointer;user-select:none" data-click="_tfToggle">'+
-        '<div class="flex items-center gap-2 min-w-0">'+MI('add_circle','text-[19px] text-primary-container')+
-        '<h2 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight shrink-0">新增定时任务</h2>'+
-        '<span class="text-body-sm font-body-sm text-outline truncate">每个任务绑定一个抖音号</span></div>'+
-        '<button id="tfHeadBtn" class="h-8 px-3 rounded bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center gap-1.5 transition-colors shrink-0" data-click="_tfToggle">'+
-        MI(_tfO?'expand_less':'expand_more','text-[16px]')+'<span id="tfToggleTxt">'+(_tfO?'收起':'展开表单')+'</span></button>'+
-        '</div>';
-      html+='<div id="tfBody" class="px-4 pb-4 border-t border-surface-container-high/60"'+(_tfO?'':' style="display:none"')+'>';
-      html+='<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-3 pt-3">';
-      html+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">抖音号</label><select id="newTaskAcc" class="dark-input" style="width:100%" data-change="Actions.onSchedAccChange">';
-      for(const a of _accs)html+='<option value="'+esc(a.unique_id)+'"'+(a.unique_id===App.state.currentAccount?' selected':'')+'>'+esc(a.username)+' ('+esc(a.unique_id)+')</option>';
-      html+='</select></div>';
-      html+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">任务类型</label><select id="newTaskType" class="dark-input" style="width:100%" data-change="Actions.onSchedTypeChange"><option value="main">批量续（所有目标好友）</option><option value="custom">单独续（指定好友）</option></select></div>';
-      html+='<div id="targetRow" class="off" style="display:none"><label class="text-body-sm font-body-sm text-outline block mb-1">目标好友</label><select id="newTaskTarget" class="dark-input" style="width:100%"><option value="">加载中...</option></select></div>';
-      html+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">执行时间</label><div class="flex items-center gap-2"><input type="number" id="newTaskHour" value="0" min="0" max="23" class="dark-input" style="width:72px"> 时 <input type="number" id="newTaskMinute" value="10" min="0" max="59" class="dark-input" style="width:72px"> 分</div></div>';
-      html+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">随机延迟（分钟）</label><input type="number" id="newTaskDelay" value="0" min="0" max="720" class="dark-input" style="width:110px"></div>';
-      html+='<div><label class="text-body-sm font-body-sm text-outline block mb-1">发送话术</label><select id="newTaskMsgMode" class="dark-input" style="width:100%" data-change="Actions.onSchedMsgModeChange"><option id="newTaskMsgModeDefault" value="template">今日火花 + 每日一言</option><option value="custom">自定义话术</option></select>';
-      html+='<div class="text-body-sm text-outline mt-1" id="newTaskMsgHint"></div></div>';
-      html+='<div id="newTaskMsgRow" class="off lg:col-span-2" style="display:none"><label class="text-body-sm font-body-sm text-outline block mb-1">自定义话术</label><textarea id="newTaskMsg" class="dark-input" rows="2" style="width:100%;resize:vertical" placeholder="输入要发送的话，例如：睡了吗？[二哈]（留空则用「今日火花 + 每日一言」）"></textarea></div>';
-      html+='</div>';
-      html+='<div class="mt-3 pt-3 border-t border-surface-container-high/60"><button class="h-9 px-4 rounded-lg bg-primary-container hover:bg-[#ff925c] text-white text-body-sm font-semibold flex items-center gap-1.5 active:scale-95 transition-all" data-click="Actions.addSchedTask">'+MI('add','text-[17px]')+'添加任务</button></div>';
-      html+='</div>';   /* /tfBody */
-      html+='</section>';
-    }
+    /* ---------- 3) 新增定时任务：由定时任务列表卡头「添加」弹出的 #tfModal（见 Actions.openTaskForm） ---------- */
 
     /* ---------- 4) 运行日志（终端） ---------- */
     const _ltab=App.state._logTab||'main';
@@ -4176,7 +4014,7 @@ Loaders.tasks=async function(_poll){
       '<span class="w-9 h-5 rounded-full bg-surface-container-high peer-checked:bg-primary-container relative transition-colors after:content-[\'\'] after:absolute after:top-[2px] after:left-[2px] after:w-4 after:h-4 after:rounded-full after:bg-white after:transition-all peer-checked:after:translate-x-4"></span></label></div>'+
       '<span class="w-px h-4 bg-outline-variant/30"></span>'+
       '<button class="flex items-center gap-1 px-2.5 py-1.5 bg-surface-container-lowest hover:bg-surface-container border border-surface-container-high rounded-lg text-body-sm font-body-sm text-on-surface transition-colors" data-click="Actions.refreshLog" data-pass-this="1">'+MI('refresh','text-[16px]')+'刷新</button>'+
-      '<button class="flex items-center gap-1 px-2.5 py-1.5 bg-surface-container-lowest hover:bg-surface-container border border-surface-container-high rounded-lg text-body-sm font-body-sm text-on-surface transition-colors" data-click="_logExport">'+MI('download','text-[16px]')+'导出日志</button>'+
+      /* [v17.2] 用户要求：「导出日志」按钮去掉（要留档直接 scp 服务器上的 .log 更实在）。 */
       '</div></div>';
     const _termCls='bg-surface-container-lowest border border-surface-container-high rounded-lg p-3 font-mono-code-sm text-mono-code-sm text-on-surface-variant overflow-auto whitespace-pre-wrap break-words leading-relaxed custom-scroll';
     html+='<div class="mt-3"><div id="logMain" class="'+_termCls+'" style="max-height:300px;'+( _ltab==='main'?'':'display:none')+'">'+esc(lm.log||'（无日志）')+'</div>'+
@@ -4251,14 +4089,6 @@ function _taskRunPulse(btn){
   if(sync&&sync.checked)App.state._pulseAutoRefresh=true;
   Actions.run('custom',tgt,false,btn,v,mode);
 }
-/* [v11] 「新增定时任务」表单展开/收起（纯 DOM 切换，不重新请求） */
-function _tfToggle(){
-  var open=!App.state._tfOpen;
-  App.state._tfOpen=open;
-  var b=document.getElementById('tfBody');if(b)b.style.display=open?'':'none';
-  var h=document.getElementById('tfHeadBtn');
-  if(h)h.innerHTML=MI(open?'expand_less':'expand_more','text-[16px]')+'<span id="tfToggleTxt">'+(open?'收起':'展开表单')+'</span>';
-}
 function _logTab(v){
   App.state._logTab=(v==='custom')?'custom':'main';
   document.querySelectorAll('#logTabs button').forEach(function(b){
@@ -4268,18 +4098,8 @@ function _logTab(v){
     if(e)e.style.display=((id==='logMain')===(App.state._logTab==='main'))?'':'none';});
 }
 function _logAuto(on){App.state._logAuto=!!on;}
-function _logExport(){
-  var id=(App.state._logTab==='custom')?'logCustom':'logMain';
-  var e=document.getElementById(id);
-  var txt=(e&&e.textContent)||'';
-  var name='douyin_'+((App.state._logTab==='custom')?'custom_msg':'sparkflow')+'.log';
-  try{
-    var blob=new Blob([txt],{type:'text/plain;charset=utf-8'});
-    var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;
-    document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},1500);
-    toast('已导出',name,'ok');
-  }catch(err){toast('导出失败',err.message,'err');}
-}
+/* [v17.2] _logExport() 已删除 —— 用户要求去掉运行日志的「导出日志」按钮。
+   要留档直接在服务器上看 /var/log/douyin_sparkflow.log（页脚已写明路径）。 */
 
 /*================ 执行台账（Stitch 05 稿 1:1 还原） ================*/
 Loaders.logs=async function(){
@@ -4301,7 +4121,14 @@ Loaders.logs=async function(){
     if(App.state._recCalMonth==null)App.state._recCalMonth='';
     if(App.state._recScope==null)App.state._recScope='cur';
     if(!App.state._recLimit)App.state._recLimit=200;
-    const lim=App.state._recLimit;
+    /* [v17.2] 用户要求：记录页默认只看最近 7 天，更早的点「查看更多」再看。
+       口径放在前端：/api/records 只认 limit，加 days 参数要改后端 + 重启容器，
+       而「显示多少天」纯粹是展示层的事。
+       做法：一次拉够（limit≥500，约覆盖 100+ 天），全量存 _recAllRecs，
+       再按 _recKeepDays（默认 7，每点一次 +7）筛出 _recRecs 渲染。
+       limit 必须放大：一天 4 个号 ×2 轮推送 + 任务执行，200 条撑不满 7 天。 */
+    if(!App.state._recKeepDays)App.state._recKeepDays=REC_KEEP_DAYS;
+    const lim=Math.max(App.state._recLimit,500);
     const _cur=App.state.currentAccount||'';
     /* scope=cur 才带 account；scope=all 不带 → 后端返回名下全部账号合并 */
     const _url='/api/records?limit='+lim+(App.state._recScope==='cur'&&_cur?('&account='+encodeURIComponent(_cur)):'');
@@ -4309,14 +4136,39 @@ Loaders.logs=async function(){
     let recs=(d.records||[]).slice().reverse();
     /* 当前账号被管理员切成「查看别人」时仍按目标好友收敛（网页端特有的归属隔离） */
     const _lt=App.currentTargets();if(_lt&&App.state._recScope==='cur'){recs=recs.filter(r=>r.target==='all'||_lt.has(r.target));}
-    App.state._recRecs=recs.map(_recItem);
+    App.state._recAllRecs=recs.map(_recItem).filter(function(r){return r.day;});
+    /* 后端按 limit 截断了 → 「查看更多」还要再拉一批 */
     App.state._recHasMore=((d.records||[]).length>=lim);
+    _recApplyWindow();
     _recRender();
     if(App.state._logsTab==='logs'&&!App.state._recLog)_recLoadLogs();
   }catch(e){
     if(e.message!=='unauthorized')viewError('logs',e);
   }
 };
+/* [v17.2] 按「显示最近 N 天」把全量记录裁成当前可见列表。
+   _recOlderHidden = 被窗口挡在外面的条数（>0 才出「查看更多」）。
+   _recAllRecs 已按新→旧排好序（Loaders.logs 里 reverse 过），无需重排。 */
+function _recApplyWindow(){
+  const all=App.state._recAllRecs||[];
+  const cut=_recCutoff(App.state._recKeepDays||REC_KEEP_DAYS);
+  const shown=all.filter(function(r){return r.day>=cut;});
+  App.state._recRecs=shown;
+  App.state._recOlderHidden=all.length-shown.length;
+}
+/* [v17.2] 记录页只看最近 N 天。取本地日期（北京时间由浏览器决定，
+   面板用户都在国内），返回 YYYY-MM-DD，与 _recItem().day 同格式，
+   直接做字符串比较即可（ISO 日期天然可比）。
+   days=7 → 含今天在内的 7 个自然日（今天 - 6）。 */
+var REC_KEEP_DAYS=7;
+function _recCutoff(days){
+  var n=Number(days)>0?Number(days):REC_KEEP_DAYS;
+  var d=new Date();
+  d.setHours(0,0,0,0);
+  d.setDate(d.getDate()-(n-1));
+  var m=d.getMonth()+1,day=d.getDate();
+  return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(day<10?'0':'')+day;
+}
 /* 一条台账记录 → 列表项。批量/单独的判定口径照抄小程序 pages/records/records.js：
    有没有一个具体的目标好友 —— 有 = 单独，target 是 all = 批量；
    只有 target 缺失时才回落到 task 字段（历史脏数据兜底）。
@@ -4380,7 +4232,7 @@ function _recRender(){
         return '<button class="seg__i'+(_sc===x[0]?' seg__i--on':'')+'" data-click="_recScope" data-arg="'+x[0]+'">'+x[1]+'</button>';
       }).join('')+
       '<span class="tiny muted seg__note">'+
-        (_sc==='all'?('名下所有抖音号合并 · 共 '+recs.length+' 条'):('共 '+recs.length+' 条记录'))+'</span>'+
+        (_sc==='all'?('近 '+(App.state._recKeepDays||REC_KEEP_DAYS)+' 天 · 名下所有抖音号合并 · 共 '+recs.length+' 条'):('近 '+(App.state._recKeepDays||REC_KEEP_DAYS)+' 天 · 共 '+recs.length+' 条记录'))+'</span>'+
       '</div>';
   }
 
@@ -4497,10 +4349,21 @@ function _recPaint(){
       });
       h+='</div>';
     });
-    /* [v13] 小程序这里只有一个「加载更早的记录」fchip，没有「显示 X / Y 条」 */
-    if(App.state._recHasMore)
+    /* [v13] 小程序这里是「加载更早的记录」fchip，没有「显示 X / Y 条」
+       [v17.2] 默认只显示最近 7 天，更早的点「查看更多」逐次展开（每次 +7 天）；
+       本地已经到头就明确说「已显示全部」，别留一个点了没反应的按钮。 */
+    const _keep=App.state._recKeepDays||REC_KEEP_DAYS;
+    const _older=App.state._recOlderHidden||0;
+    const _total=(App.state._recAllRecs||[]).length;
+    if(_older>0||App.state._recHasMore){
       h+='<div class="fbar" style="margin-top:10px;justify-content:center">'+
-        '<button class="fchip" data-click="Actions.recMore">加载更早的记录</button></div>';
+        '<button class="fchip" data-click="Actions.recMore">查看更多'+
+        (_older>0?('（还有 '+_older+' 条）'):'（更早的）')+'</button></div>';
+    }
+    h+='<div class="tiny muted" style="margin-top:8px;text-align:center">'+
+      (_older>0
+        ?('当前显示最近 '+_keep+' 天 · 列表 '+list.length+' 条 / 共 '+_total+' 条')
+        :('已显示全部 '+_total+' 条记录'))+'</div>';
   }
   box.innerHTML=h;
 }
@@ -4610,9 +4473,19 @@ _V9A.recTab=function(t){
   if(t==='logs'&&!App.state._recLog)_recLoadLogs();
   else _recRender();
 };
+/* [v17.2] 「查看更多」= 把显示窗口再放宽 7 天。
+   本地还有更早的记录时纯前端展开（秒开）；只有后端 limit 截断了才回源再拉一批。 */
 _V9A.recMore=function(){
-  App.state._recLimit=(App.state._recLimit||200)+200;
-  Loaders.logs();
+  if((App.state._recOlderHidden||0)>0){
+    App.state._recKeepDays=(App.state._recKeepDays||REC_KEEP_DAYS)+REC_KEEP_DAYS;
+    _recApplyWindow();
+    _recRender();
+    return;
+  }
+  if(App.state._recHasMore){
+    App.state._recLimit=(App.state._recLimit||500)+500;
+    Loaders.logs();
+  }
 };
 _V9A.recCopyLog=function(){
   const txt=App.state._recLog||'';
@@ -4700,7 +4573,8 @@ function drSparkText(s){
   /* [v17.0] 「已断·重燃中」单独一档：它有截止日（还剩几天彻底消失），最急 */
   if(s.revive)seg.push('<span style="color:var(--red)">重燃中 '+s.revive+' 个</span>');
   if(s.broken)seg.push('<span style="color:var(--red)">已断火花 '+s.broken+' 个</span>');
-  if(s.none)seg.push('<span style="color:var(--red)">无火花 '+s.none+' 个</span>');
+  /* [20261024] 无火花 = 没启动火花，灰色列出（不再是红色告警） */
+  if(s.none)seg.push('<span style="color:var(--txt3,#8b95a7)">○ 无火花 '+s.none+' 个（未启动）</span>');
   if(s.low)seg.push('<span style="color:var(--amber)">告急 '+s.low+' 个</span>');
   if(s.unknown)seg.push('<span class="tiny muted">未抓到 '+s.unknown+' 个</span>');
   const tail=' <span class="tiny muted">共 '+s.total+' 人'+(s.when?' · 数据 '+esc(s.when):'')+'</span>';
@@ -4708,31 +4582,10 @@ function drSparkText(s){
   if(s.min_days!=null)return '<span style="color:var(--green)">最少 '+s.min_days+' 天</span>'+tail;
   return tail;
 }
-function drFriendLine(f){
-  const n=esc(f.name||'?');
-  const st=String(f.spark_state||'');
-  if(st==='revive'){
-    const g=(f.revive_done!=null&&f.revive_total!=null)?(f.revive_done+'/'+f.revive_total):'';
-    return '<div style="color:var(--red)">🕯 '+n+' · 已断 · 重燃中'+esc(g)+
-      (f.revive_left!=null?('（还剩 '+esc(f.revive_left)+' 天彻底消失）'):'')+'</div>';
-  }
-  if(st==='none')return '<div style="color:var(--red)">⛔ '+n+' · 无火花</div>';
-  if(f.days==null)return '<div style="color:var(--txt3,#8b95a7)">❓ '+n+' · 未抓到</div>';
-  if(f.days<=DR_BROKEN)return '<div style="color:var(--red)">💔 '+n+' · '+f.days+' 天（已断）</div>';
-  if(f.days<DR_LOW)return '<div style="color:var(--amber)">⚠️ '+n+' · '+f.days+' 天</div>';
-  return '<div style="color:var(--green)">✅ '+n+' · '+f.days+' 天</div>';
-}
-function drFriends(list){
-  if(!list||!list.length)return '';
-  const bad=list.filter(f=>f.days==null||f.spark_state==='revive'||f.spark_state==='none'||f.days<DR_LOW);
-  const good=list.filter(f=>f.days!=null&&f.spark_state!=='revive'&&f.spark_state!=='none'&&f.days>=DR_LOW);
-  let h=bad.slice(0,12).map(drFriendLine).join('');
-  if(bad.length>12)h+='<div class="tiny muted">…另有 '+(bad.length-12)+' 个需处理好友</div>';
-  if(good.length)h+='<details style="margin-top:6px"><summary class="tiny muted" style="cursor:pointer">正常好友 '+good.length+' 个</summary>'+good.map(drFriendLine).join('')+'</details>';
-  return h?'<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px;font-size:12.5px;line-height:1.8">'+h+'</div>':'';
-}
 function drSendLine(rows){
-  if(!rows||!rows.length)return '<span class="tiny muted">无记录</span>';
+  /* [v18] 没记录时输出「—」而不是「无记录」：五个号里三个都写「无记录」，
+     读起来像三条告警，其实只是没有数据。 */
+  if(!rows||!rows.length)return '<span class="text-outline">—</span>';
   return rows.map(r=>r.kind+' '+r.ok+'/'+r.total).join(' · ');
 }
 /*================ 日报（Stitch 06 稿 1:1 还原，按抖音号拆分） ================*/
@@ -4740,39 +4593,35 @@ Loaders.daily=async function(){
   const el=ensureView('daily');
   if(!el.dataset.built4){
     el.innerHTML=
-    '<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] p-4">'+
-      '<div class="flex items-center justify-between gap-3 flex-wrap">'+
-        '<div class="flex items-center gap-2.5 min-w-0">'+
-          '<div class="w-8 h-8 rounded-lg bg-primary-container/15 border border-primary-container/30 text-primary-container flex items-center justify-center shrink-0">'+MI('summarize','text-[19px]')+'</div>'+
-          '<div class="min-w-0"><h2 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">火花守护日报</h2>'+
-          '<p class="text-body-sm font-body-sm text-outline truncate" id="drGen">按抖音号拆分</p></div>'+
-        '</div>'+
-        /* [v16.5] 整个筛选栏统一成 .drBar/.drBtn/.drSel 一套外观。此前 ‹ › 是 32×32
-           rounded-lg、「今天」「查询」是 rounded+px-3、「立即推送」是 px-3.5，
-           圆角/内边距/边框三样都不一样，扫过去像五组控件而不是一组筛选条件。 */
-        '<div class="drBar">'+
-          '<div class="drGrp">'+
-            '<span class="drLb">日期</span>'+
-            '<button class="drBtn drBtn--ico" title="往前一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="-1">'+MI('chevron_left','text-[16px]')+'</button>'+
-            /* [v16.5] 日期由 <input type="date"> 改成 <select>：原生日期框在安卓 App 的
-               WebView 里唤不起选择器（点了没反应）；桌面虽能用，但外观和旁边控件对不齐。
-               下拉里给「今天（实时）」+ 近 30 天，有存档的那几天额外标注。 */
-            '<select id="drDate" class="drSel" title="留空 = 今天（实时生成）"></select>'+
-            '<button class="drBtn drBtn--ico" title="往后一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="1">'+MI('chevron_right','text-[16px]')+'</button>'+
-          '</div>'+
-          '<label class="drGrp" id="drScopeWrap"><span class="drLb">范围</span><select id="drScope" class="drSel"><option value="all">全部账号</option><option value="cur">当前账号</option></select></label>'+
-          '<span id="drSnapWrap"></span>'+
-          '<label class="drGrp drGrp--chk"><input type="checkbox" id="drSess" checked class="accent-[#ff7a45]"><span class="drLb">校验登录态</span></label>'+
-          '<button class="drBtn" data-click="Loaders.daily" data-args="true">'+MI('search','text-[16px]')+'查询</button>'+
-          '<button class="drBtn drBtn--pri" data-click="Actions.pushDailyReport" data-pass-this="1">'+MI('send','text-[16px]')+'立即推送给我</button>'+
+    /* [v18 日报精简] 头部只留：标题 + 刷新 + 能改变内容的筛选条件 + 一行统计。
+       删掉的：① 标题下的（生成时间 · 全部账号）副行 —— 并入底部统计行，一行说完；
+       ② 左侧 32×32 的 summarize 图标方块 —— 纯装饰；③「校验登录态」勾选 —— 默认开即可，
+       它本来也只控制「要不要再异步补一次登录态校验」，不影响报表内容；
+       ④「查询」按钮 —— 日期/范围的下拉 change 已自动查询，改成刷新图标（乱选同一天时用）；
+       ⑤ 卡片内的「立即推送」—— 顶栏已有同一枚按钮，页面级动作不该出现两次。 */
+    '<div class="drHeadCard">'+
+      '<div class="drHeadTop">'+
+        '<h2 class="drTitle">火花守护日报</h2>'+
+        /* [v21] 用户要求：「立即推送」放回日报卡右侧（原顶栏那枚已删）。
+           刷新仍留在标题行右端，两个按钮同组、右对齐。 */
+        '<div class="flex items-center gap-2 shrink-0">'+
+          '<button class="drBtn drBtn--pri" data-click="Actions.pushDailyReport" data-pass-this="1">'+MI('send','text-[15px]')+'立即推送</button>'+
+          '<button class="drBtn drBtn--ico" title="重新生成" data-click="Loaders.daily" data-args="true">'+MI('refresh','text-[16px]')+'</button>'+
         '</div>'+
       '</div>'+
-      /* [v6.11] 「存档日期」快捷入口行按用户要求移除（查历史日报仍可用上方日期输入框） */
-      '<div class="text-body-sm font-body-sm text-outline mt-2" id="drStat"></div>'+
+      '<div class="drBar">'+
+        '<button class="drBtn drBtn--ico" title="往前一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="-1">'+MI('chevron_left','text-[16px]')+'</button>'+
+        /* 日期用 <select>：原生 <input type="date"> 在安卓 App 的 WebView 里唤不起选择器。 */
+        '<select id="drDate" class="drSel drSel--date" title="留空 = 今天（实时生成）"></select>'+
+        '<button class="drBtn drBtn--ico" title="往后一天（优先跳到有数据的日期）" data-click="Actions.drStep" data-arg="1">'+MI('chevron_right','text-[16px]')+'</button>'+
+        '<label class="drGrp" id="drScopeWrap"><select id="drScope" class="drSel"><option value="all">全部账号</option><option value="cur">当前账号</option></select></label>'+
+        '<span id="drSnapWrap"></span>'+
+      '</div>'+
+      '<div class="drStat"><span id="drGen"></span><span id="drStat"></span></div>'+
     '</div>'+
-    '<div id="drBody" class="flex flex-col gap-6"><div class="py-12 text-center text-body-sm text-outline">加载中…</div></div>';
+    '<div id="drBody" class="flex flex-col gap-5"><div class="py-12 text-center text-body-sm text-outline">加载中…</div></div>';
     el.dataset.built4='1';
-    ['drScope','drSess','drDate'].forEach(id=>{const n=document.getElementById(id);if(n)n.addEventListener('change',()=>Loaders.daily(true));});
+    ['drScope','drDate'].forEach(id=>{const n=document.getElementById(id);if(n)n.addEventListener('change',()=>Loaders.daily(true));});
   }
   const wrap=document.getElementById('drScopeWrap');
   if(wrap)wrap.style.display=App.state.isAdmin?'':'none';   // 普通用户只有自己的号，无需选范围
@@ -4783,7 +4632,8 @@ Loaders.daily=async function(){
   App.state._drDatesP=drLoadDates();
   body.innerHTML='<div class="py-12 text-center text-body-sm text-outline">加载中…</div>';
   try{
-    const sess=(document.getElementById('drSess')||{}).checked?'1':'0';
+    /* [v18] 原「校验登录态」勾选框已删，登录态一律校验（原默认即勾选）。 */
+    const sess='1';
     let url='/api/daily-report?sessions=0';
     const scope=App.state.isAdmin?((document.getElementById('drScope')||{}).value||'all'):'all';
     if(scope==='cur'&&App.state.currentAccount)url+='&account='+encodeURIComponent(App.state.currentAccount);
@@ -4799,7 +4649,7 @@ Loaders.daily=async function(){
       /* [v6.23] 空状态也要改写表头/快照行，否则它们还挂着「上一天」的文字
          （比如刚看过 10-05 的归档包，再切到没存档的 09-01，表头会继续显示「归档包 2026-10-05…」）。 */
       const g0=document.getElementById('drGen');
-      if(g0)g0.textContent=(d.date?d.date+' · ':'')+'没有日报存档';
+      if(g0)g0.textContent='';
       const sw0=document.getElementById('drSnapWrap');
       if(sw0)sw0.innerHTML='';
       const st0=document.getElementById('drStat');
@@ -4823,35 +4673,37 @@ Loaders.daily=async function(){
     }
     /* [v6.11] drLoadDates()（存档日期快捷入口）已随 drArch 行一起下线 */
     const s=d.summary||{};App.state._drData=d;
-    const rate=s.sent_total?Math.round(s.sent_ok/s.sent_total*100):100;
 
-    /* ---------- KPI 四张 ---------- */
-    const KPI=(label,icon,val,unit,sub,glow,color)=>{
-      return '<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] p-4 flex flex-col justify-between '+(glow?'hover:border-primary-container/40':'hover:border-outline-variant/60')+' transition-colors">'+
-        '<div class="flex items-center justify-between"><span class="text-label-uppercase font-label-uppercase text-outline tracking-wider">'+label+'</span>'+
-        '<div class="w-7 h-7 rounded-md flex items-center justify-center '+(glow?'bg-primary-container/15 text-primary-container':'bg-surface-container text-outline')+'">'+MI(icon,'text-[16px]')+'</div></div>'+
-        '<div class="my-3 flex items-baseline gap-2"><span class="text-mono-metric-lg font-mono-metric-lg '+(color||(glow?'text-primary-container':'text-on-surface'))+' tracking-tight">'+val+'</span>'+
-        '<span class="text-body-md font-body-md text-outline">'+unit+'</span></div>'+
-        '<div class="pt-2 border-t border-surface-container-high/60">'+sub+'</div></div>';
+    /* ---------- KPI 四张 ----------
+       [v18 日报精简] 原来每张卡：标签 + 右上图标方块 + 大数字 + 单位 + 分隔线 + 一句小字，
+       手机端四张竖排各 143px，光 KPI 就吃掉 620px（一屏半）；而小字里「成功 / 共 6 次（100%）」
+       只是把大数字又说了一遍。现在：2×2 网格、去掉分隔线与图标方块，副行只写「大数字之外的
+       那一半信息」（全部送达 / N 异常 / 几个告急），没有额外信息时就一个「无」或「全部正常」。 */
+    const KPI=(label,icon,val,unit,sub,tone)=>{
+      const c=tone==='bad'?'text-error':tone==='warn'?'text-[#f59e0b]':tone==='ok'?'text-tertiary':'text-outline';
+      return '<div class="drKpi">'+
+        '<div class="drKpiTop"><span class="drKpiLb">'+label+'</span>'+MI(icon,'text-[15px] '+c)+'</div>'+
+        '<div class="drKpiVal '+(tone==='bad'?'text-error':tone==='warn'?'text-[#f59e0b]':'')+'">'+val+'<span class="drKpiUnit">'+unit+'</span></div>'+
+        '<div class="drKpiSub '+(tone==='bad'?'text-error':tone==='warn'?'text-[#f59e0b]':'')+'">'+(sub||'')+'</div>'+
+      '</div>';
     };
-    let html='<section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">';
-    html+=KPI('今日发送',(s.sent_total&&s.sent_ok<s.sent_total)?'error':'check_circle',s.sent_ok,'条',
-      '<span class="text-body-sm font-body-sm '+((s.sent_total&&s.sent_ok<s.sent_total)?'text-error':'text-tertiary')+' flex items-center gap-1">'+
-      MI((s.sent_total&&s.sent_ok<s.sent_total)?'priority_high':'check_circle','text-[14px]')+'成功 / 共 '+s.sent_total+' 次'+(s.sent_total?('（'+rate+'%）'):'')+'</span>',
-      false,(s.sent_total&&s.sent_ok<s.sent_total)?'text-error':null);
-    html+=KPI('待处理','warning',s.issues,'项',
-      (s.issues?'<span class="text-body-sm font-body-sm text-[#f59e0b] flex items-center gap-1">'+MI('priority_high','text-[14px]')+'发送失败 · 登录失效 · 火花异常</span>'
-              :'<span class="text-body-sm font-body-sm text-tertiary flex items-center gap-1">'+MI('verified_user','text-[14px]')+'无异常，一切正常</span>'),
-      false,s.issues?'text-[#f59e0b]':null);
+    let html='<section class="grid grid-cols-2 xl:grid-cols-4 gap-3">';
+    const _sentBad=!!(s.sent_total&&s.sent_ok<s.sent_total);
+    html+=KPI('今日发送',_sentBad?'error':'check_circle',s.sent_ok,'条',
+      s.sent_total?(_sentBad?(s.sent_ok+'/'+s.sent_total+' 成功'):'全部送达'):'今日无发送',_sentBad?'bad':'ok');
+    /* [v18] 待处理为 0 时不写副行：「0 项 / 无」是把同一件事说两遍，数字自己说得清。
+       为了让这张卡不至于空一块，零待办时图标换成绿勾（状态自解释）。 */
+    html+=KPI('待处理',s.issues?'warning':'check_circle',s.issues,'项',
+      s.issues?'发送失败 · 登录失效 · 火花异常':'',s.issues?'warn':'ok');
     html+=KPI('账号状态','switch_account',(s.accounts||0),'个',
-      '<span class="text-body-sm font-body-sm flex items-center gap-2 flex-wrap">'+
-      '<span class="'+(s.bad?'text-error':'text-tertiary')+'">'+(s.bad||0)+' 异常</span><span class="text-outline">·</span>'+
-      '<span class="'+(s.warn?'text-[#f59e0b]':'text-outline')+'">'+(s.warn||0)+' 需注意</span>'+
-      (s.bad?'<span class="shrink-0 w-2 h-2 rounded-full bg-error pulse-danger"></span>':'')+'</span>');
-    html+=KPI('火花风险','local_fire_department',((s.spark_broken||0)+(s.spark_none||0)),'人',
-      '<span class="text-body-sm font-body-sm '+(s.spark_low?'text-[#f59e0b]':'text-outline')+' flex items-center gap-1">'+
-      MI((s.spark_low||(s.spark_broken||0)+(s.spark_none||0))?'priority_high':'check_circle','text-[14px]')+'断/无火花 · 另有 '+(s.spark_low||0)+' 个告急</span>',
-      (((s.spark_broken||0)+(s.spark_none||0))>0)?false:false,((s.spark_broken||0)+(s.spark_none||0))?'text-error':null);
+      s.bad?(s.bad+' 异常'):(s.warn?((s.warn)+' 需注意'):'全部正常'),
+      s.bad?'bad':(s.warn?'warn':'ok'));
+    /* [20261024] 「火花风险」只计已断；无火花（没启动火花）不进这个红数字，灰色附注 */
+    html+=KPI('火花风险','local_fire_department',(s.spark_broken||0),'人',
+      (s.spark_broken||0)?('另有 '+(s.spark_low||0)+' 告急')
+        :((s.spark_low||0)?((s.spark_low)+' 个告急')
+        :(s.spark_none?('无火花 '+s.spark_none+'（未启动）'):'全部健康')),
+      (s.spark_broken||0)?'bad':((s.spark_low||0)?'warn':''));
     html+='</section>';
 
     /* ---------- 主区两列 ---------- */
@@ -4859,94 +4711,47 @@ Loaders.daily=async function(){
     html+='<div class="xl:col-span-8 flex flex-col gap-5">';
 
     /* 账号概览 */
-    const accBadge=b=>b==='bad'?'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-error bg-error-container/25 border-error/40">异常</span>'
-      :b==='warn'?'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-[#f59e0b] bg-[rgba(245,158,11,.12)] border-[rgba(245,158,11,.35)]">火花注意</span>'
-      :'<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase text-tertiary bg-tertiary-container/15 border-tertiary-container/30">正常</span>';
+    /* [v18 日报精简] 每个号原来是「2×2 四个带大写标签的格子」，5 个号吃掉 835px，
+       而且四个号都挂一枚绿色「正常」徽章、每行还配一个同样的 person 图标 —— 全是噪音。
+       现在每个号压成两行：名字+号 / 一句内联的「今日 昨日 火花 登录态」；
+       只在异常或火花注意时出徽章，正常什么都不挂，颜色本身就说明问题。 */
+    const accBadge=b=>b==='bad'?'<span class="drPill drPill--bad">异常</span>'
+      :b==='warn'?'<span class="drPill drPill--warn">火花注意</span>'
+      :'';
     const _accsAll=d.accounts||[];
     html+='<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] overflow-hidden">'+
-      '<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3">'+
-      '<div class="flex items-center gap-3"><h3 class="text-headline-md font-headline-md font-semibold text-on-surface">抖音账号概览</h3>'+
-      '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest">'+_accsAll.length+' 个号</span></div>'+
-      '<span class="text-body-sm font-body-sm text-outline hidden md:block">今日 / 昨日发送 · 火花 · 登录态</span></div>';
+      '<div class="px-5 py-4 border-b border-surface-container-high flex items-center gap-3">'+
+      '<h3 class="text-headline-md font-headline-md font-semibold text-on-surface">抖音账号概览</h3>'+
+      '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest">'+_accsAll.length+' 个号</span></div>';
     if(!_accsAll.length){html+='<div class="py-12 text-center text-body-sm text-outline">当前范围内没有可展示的抖音号</div>';}
     _accsAll.forEach(a=>{
       const sok=a.session||{};
-      const sessHtml=(sok.ok===true?'<span class="text-tertiary">有效</span>':sok.ok===false?'<span class="text-error">'+esc(sok.desc||'需重新登录')+'</span>':(sess==='1'?'<span class="text-outline">校验中…</span>':'<span class="text-outline">未校验</span>'));
+      const sessHtml=(sok.ok===true?'<span class="text-tertiary">有效</span>':sok.ok===false?'<span class="text-error">'+esc(sok.desc||'需重新登录')+'</span>':(sess==='1'?'<span class="text-outline">校验中…</span>':'<span class="text-outline">—</span>'));
       const sp=a.spark||{};
       const spTxt=sp.no_target?'<span class="text-outline">无目标好友</span>'
-        :[(sp.broken?('<span class="text-error">已断 '+sp.broken+'</span>'):''),(sp.none?('<span class="text-error">无火花 '+sp.none+'</span>'):''),(sp.low?('<span class="text-[#f59e0b]">告急 '+sp.low+'</span>'):'')].filter(Boolean).join(' · ')
+        :[(sp.broken?('<span class="text-error">已断 '+sp.broken+'</span>'):''),(sp.none?('<span class="text-outline">无火花 '+sp.none+'</span>'):''),(sp.low?('<span class="text-[#f59e0b]">告急 '+sp.low+'</span>'):'')].filter(Boolean).join(' · ')
           ||(sp.min_days!=null?('<span class="text-tertiary">最少 '+sp.min_days+' 天</span>'):'<span class="text-outline">—</span>');
-      html+='<div class="px-5 py-3.5 border-b border-surface-container-high/60 last:border-0 hover:bg-surface-container/50 transition-colors" id="drCard_'+esc(a.uid)+'">'+
-        '<div class="flex items-center justify-between gap-3 flex-wrap">'+
-        '<div class="flex items-center gap-3 min-w-0">'+
-          '<div class="w-9 h-9 rounded-lg bg-surface-container border border-surface-container-high flex items-center justify-center text-primary-container shrink-0">'+MI('person','text-[18px]')+'</div>'+
-          '<div class="min-w-0"><div class="text-body-md font-body-md font-semibold text-on-surface truncate">'+esc(a.uname)+'</div>'+
-          '<div class="text-mono-code-sm font-mono-code-sm text-outline truncate">'+esc(a.uid)+'</div></div></div>'+
-        '<span id="drBadge_'+esc(a.uid)+'">'+accBadge(a.badge)+'</span></div>'+
-        '<div class="grid grid-cols-2 lg:grid-cols-4 gap-x-4 gap-y-2 mt-2.5">'+
-          '<div><div class="text-[10px] font-label-uppercase text-outline tracking-wider">今日发送</div><div class="text-body-sm font-body-sm text-on-surface">'+drSendLine(a.send)+'</div></div>'+
-          '<div><div class="text-[10px] font-label-uppercase text-outline tracking-wider">昨日发送</div><div class="text-body-sm font-body-sm text-on-surface">'+drSendLine(a.send_yday)+'</div></div>'+
-          '<div><div class="text-[10px] font-label-uppercase text-outline tracking-wider">火花</div><div class="text-body-sm font-body-sm">'+spTxt+((sp.stale)?' <span class="text-[#f59e0b]">'+sp.stale+' 个超26h</span>':'')+'</div></div>'+
-          '<div><div class="text-[10px] font-label-uppercase text-outline tracking-wider">登录态</div><div class="text-body-sm font-body-sm cursor-pointer" id="drSess_'+esc(a.uid)+'" data-click="Actions.drForceSession" data-uid="'+esc(a.uid)+'" data-pass-this="1" title="点击强制重新校验">'+sessHtml+'</div></div>'+
+      html+='<div class="drAcc" id="drCard_'+esc(a.uid)+'">'+
+        '<div class="drAccTop">'+
+          '<div class="drAccName">'+esc(a.uname)+'<span class="drAccId">'+esc(a.uid)+'</span></div>'+
+          '<span id="drBadge_'+esc(a.uid)+'">'+accBadge(a.badge)+'</span>'+
         '</div>'+
-        ((a.fails||[]).length?('<div class="mt-2 text-body-sm text-error leading-relaxed"><span class="text-outline">失败明细 </span>'+a.fails.slice(0,6).map(f=>esc(f.ts)+' '+esc(f.kind)+' → '+esc(f.target)).join(' · ')+((a.fails.length>6)?(' …另有 '+(a.fails.length-6)+' 条'):'')+'</div>'):'')+
+        '<div class="drAccMeta">'+
+          '<span><b>今日</b>'+drSendLine(a.send)+'</span>'+
+          '<span><b>昨日</b>'+drSendLine(a.send_yday)+'</span>'+
+          '<span><b>火花</b>'+spTxt+((sp.stale)?(' <span class="text-[#f59e0b]">'+sp.stale+' 个超26h</span>'):'')+'</span>'+
+          '<span><b>登录态</b><i id="drSess_'+esc(a.uid)+'" data-click="Actions.drForceSession" data-uid="'+esc(a.uid)+'" data-pass-this="1" title="点击强制重新校验">'+sessHtml+'</i></span>'+
+        '</div>'+
+        ((a.fails||[]).length?('<div class="drAccFails"><b>失败</b>'+a.fails.slice(0,6).map(f=>esc(f.ts)+' '+esc(f.kind)+' → '+esc(f.target)).join(' · ')+((a.fails.length>6)?(' …另有 '+(a.fails.length-6)+' 条'):'')+'</div>'):'')+
       '</div>';
     });
     html+='</div>';
 
-    /* 好友明细 */
+    /* [v18.5] 「好友明细」整块下线（用户 2026-11-15 要求）：14 位好友逐个列在日报里，
+       跟「好友与火花」页完全重复，而且日报只需要「整体有没有风险」这一层信息 ——
+       具体谁快断了去好友页看。这里只保留汇总用的 allF（火花里程分布要用）。 */
     const allF=[];
     _accsAll.forEach(a=>(a.friends||[]).forEach(f=>allF.push(Object.assign({},f,{acc:a.uname,uid:a.uid}))));
-    /* [v17.0] 排序权重：重燃中（有截止日）→ 无火花 → 未抓到 → 天数少的 */
-    const _dRank=f=>{
-      const st=String((f&&f.spark_state)||'');
-      if(st==='revive')return -3;
-      if(st==='none')return -2;
-      if(f.days==null)return -1;
-      return Number(f.days)||0;
-    };
-    allF.sort((x,y)=>_dRank(x)-_dRank(y));
-    html+='<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] overflow-hidden">'+
-      '<div class="px-5 py-4 border-b border-surface-container-high flex items-center justify-between gap-3 flex-wrap">'+
-      '<div class="flex items-center gap-3"><h3 class="text-headline-md font-headline-md font-semibold text-on-surface">好友明细</h3>'+
-      '<span class="px-2 py-0.5 rounded-full bg-surface-container text-outline text-body-sm font-mono-code-sm border border-surface-container-highest">'+allF.length+' 位</span></div>'+
-      '<span class="text-body-sm font-body-sm text-outline flex items-center gap-1">'+MI('sort','text-[15px]')+'按火花天数升序（风险优先）</span></div>';
-    if(!allF.length){html+='<div class="py-12 text-center text-body-sm text-outline">当前范围内没有好友数据</div>';}
-    else{
-      html+='<div class="overflow-x-auto custom-scroll" style="max-height:460px;overflow-y:auto"><table class="w-full border-collapse text-left">'+
-        '<thead><tr class="border-b border-surface-container-high/80 bg-surface-container-lowest/60 text-outline text-[11px]">'+
-        '<th class="py-2.5 px-5 font-semibold">好友</th><th class="py-2.5 px-4 font-semibold text-center">火花天数</th>'+
-        '<th class="py-2.5 px-4 font-semibold text-center">状态</th><th class="py-2.5 px-5 font-semibold text-right">所属账号</th></tr></thead>'+
-        '<tbody class="divide-y divide-surface-container-high/50 text-body-md font-body-md">';
-      allF.slice(0,60).forEach(f=>{
-        /* [v17.0] 状态优先看 spark_state：重燃中＝已断但有截止日；none＝从来没火花；
-           days=None ＝ 本轮没抓到（不能冒充无火花） */
-        const _st=String(f.spark_state||'');
-        const bad=f.days==null||_st==='revive'||_st==='none'||f.days<DR_LOW;
-        const broken=f.days!=null&&f.days<=DR_BROKEN&&_st!=='revive'&&_st!=='none';
-        const st=_st==='revive'?['重燃中','text-error bg-error-container/25 border-error/40','bg-error pulse-danger']
-          :(_st==='none'?['无火花','text-error bg-error-container/25 border-error/40','bg-error pulse-danger']
-          :(broken?['已断','text-error bg-error-container/25 border-error/40','bg-error pulse-danger']
-          :(f.days==null?['未抓到','text-outline bg-surface-container border-surface-container-high','bg-outline']
-          :(f.days<DR_LOW?['告急','text-[#f59e0b] bg-[rgba(245,158,11,.12)] border-[rgba(245,158,11,.35)]','bg-[#f59e0b]']
-          :['正常','text-tertiary bg-tertiary-container/15 border-tertiary-container/30','bg-tertiary']))));
-        const _num=(_st==='revive')?((f.revive_done!=null&&f.revive_total!=null)?(f.revive_done+'/'+f.revive_total):'重燃')
-          :(f.days==null?'—':f.days);
-        html+='<tr class="hover:bg-surface-container/50 transition-colors">'+
-          '<td class="py-2.5 px-5 text-on-surface">'+esc(f.name||'?')+
-            (_st==='revive'&&f.revive_left!=null?('<span class="text-body-sm text-outline"> · 还剩 '+esc(f.revive_left)+' 天</span>'):'')+'</td>'+
-          '<td class="py-2.5 px-4 text-center"><div class="inline-flex items-center gap-1">'+
-            MI('local_fire_department','text-[16px] '+(bad?'text-error':'text-primary-container'),1)+
-            '<span class="text-mono-metric-md font-mono-metric-md '+(bad?'text-error':'text-on-surface')+' font-bold">'+esc(_num)+'</span>'+
-            '<span class="text-body-sm font-body-sm text-outline">'+(_st==='revive'?'重燃':'天')+'</span></div></td>'+
-          '<td class="py-2.5 px-4 text-center"><span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase '+st[1]+'">'+
-            '<span class="w-1.5 h-1.5 rounded-full '+st[2]+'"></span>'+st[0]+'</span></td>'+
-          '<td class="py-2.5 px-5 text-right text-body-sm font-body-sm text-outline">'+esc(f.acc)+'</td></tr>';
-      });
-      html+='</tbody></table></div>';
-      if(allF.length>60)html+='<div class="px-5 py-3 border-t border-surface-container-high text-body-sm text-outline">仅显示风险最高的 60 位，共 '+allF.length+' 位</div>';
-    }
-    html+='</div>';
     html+='</div>'; /* /左列 */
 
     /* 右列 */
@@ -4964,19 +4769,21 @@ Loaders.daily=async function(){
       '<div class="flex flex-col gap-1.5">'+
       seg.map(x=>'<div class="flex items-center justify-between text-body-sm font-body-sm">'+
         '<span class="flex items-center gap-2 text-on-surface-variant"><span class="w-2.5 h-2.5 rounded-full" style="background:'+x[1]+'"></span>'+x[2]+'</span>'+
-        '<span class="font-mono-code-sm text-on-surface">'+x[0]+' <span class="text-outline">('+(Math.round(x[0]/tot*1000)/10)+'%)</span></span></div>').join('')+
+        /* [v18] 去掉「(35.7%)」：好友总共十几位，百分比是把同一件事又说一遍，且精度假得很。 */
+        '<span class="font-mono-code-sm text-on-surface">'+x[0]+'</span></div>').join('')+
       '</div></div>';
-    /* 今日提醒 */
+    /* 今日提醒：只在真有异常时出这张卡。原来无异常也渲染一整张卡写「今日无异常，守护一切正常。」，
+       而上面「待处理 0」已经说完了，等于用两处说同一句话。 */
     const iss=d.issues||[];
-    html+='<div class="bg-surface-container-low border rounded-[14px] p-4 '+(iss.length?'border-[rgba(245,158,11,.45)]':'border-surface-container-high')+'">'+
-      '<div class="flex items-center gap-2 mb-3">'+MI(iss.length?'notification_important':'check_circle','text-[19px] '+(iss.length?'text-[#f59e0b]':'text-tertiary'))+
-      '<h3 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">今日提醒</h3>'+
-      (iss.length?'<span class="px-2 py-0.5 rounded-full bg-[rgba(245,158,11,.12)] border border-[rgba(245,158,11,.3)] text-[#f59e0b] text-label-uppercase font-label-uppercase ml-auto">'+iss.length+' 项</span>':'')+'</div>';
-    if(!iss.length)html+='<div class="text-body-sm font-body-sm text-outline">今日无异常，守护一切正常。</div>';
-    else html+='<div class="flex flex-col gap-2">'+iss.slice(0,8).map(i=>'<div class="flex items-start gap-2 text-body-sm font-body-sm leading-relaxed '+
-      (i.level==='bad'?'text-error':'text-[#f59e0b]')+'">'+MI(i.level==='bad'?'error':'warning','text-[15px] shrink-0 mt-0.5')+'<span>'+esc(i.text)+'</span></div>').join('')+
-      (iss.length>8?('<div class="text-body-sm text-outline">…另有 '+(iss.length-8)+' 项</div>'):'')+'</div>';
-    html+='</div>';
+    if(iss.length){
+      html+='<div class="bg-surface-container-low border rounded-[14px] p-4 border-[rgba(245,158,11,.45)]">'+
+        '<div class="flex items-center gap-2 mb-3">'+MI('notification_important','text-[19px] text-[#f59e0b]')+
+        '<h3 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">今日提醒</h3>'+
+        '<span class="px-2 py-0.5 rounded-full bg-[rgba(245,158,11,.12)] border border-[rgba(245,158,11,.3)] text-[#f59e0b] text-label-uppercase font-label-uppercase ml-auto">'+iss.length+' 项</span></div>'+
+        '<div class="flex flex-col gap-2">'+iss.slice(0,8).map(i=>'<div class="flex items-start gap-2 text-body-sm font-body-sm leading-relaxed '+
+        (i.level==='bad'?'text-error':'text-[#f59e0b]')+'">'+MI(i.level==='bad'?'error':'warning','text-[15px] shrink-0 mt-0.5')+'<span>'+esc(i.text)+'</span></div>').join('')+
+        (iss.length>8?('<div class="text-body-sm text-outline">…另有 '+(iss.length-8)+' 项</div>'):'')+'</div></div>';
+    }
     /* 重试成功 */
     if((d.retries||[]).length){
       html+='<div class="bg-surface-container-low border border-[rgba(74,225,118,.35)] rounded-[14px] p-4">'+
@@ -4985,39 +4792,39 @@ Loaders.daily=async function(){
         '<span class="px-2 py-0.5 rounded-full bg-tertiary-container/15 border border-tertiary-container/30 text-tertiary text-label-uppercase font-label-uppercase ml-auto">无需处理</span></div>'+
         '<div class="flex flex-col gap-1.5 text-body-sm font-body-sm text-tertiary">'+
         d.retries.slice(0,8).map(x=>'<div>'+esc(x.ts)+' '+esc(x.account)+' · '+esc(x.kind)+' → '+esc(x.target)+'</div>').join('')+
-        ((d.retries.length>8)?('<div class="text-outline">…另有 '+(d.retries.length-8)+' 条</div>'):'')+'</div>'+
-        '<div class="text-body-sm font-body-sm text-outline mt-2">这些当时发失败了，随后重试已经送达，不需要你处理。</div></div>';
+        ((d.retries.length>8)?('<div class="text-outline">…另有 '+(d.retries.length-8)+' 条</div>'):'')+'</div></div>';
     }
-    /* 推送渠道 */
+    /* [v18] 「推送渠道」整张卡下线：它和头部「立即推送」按钮功能重复，末尾还挂一句
+       「推送配置在【面板用户 → 通知设置】里维护」。推送是否可用改在「系统」卡里占一行，
+       要改配置点按钮时弹窗里也说得到，不需要单开一张卡。 */
     const pcOn=!!(pc&&pc.configured&&pc.enabled!==false);
-    html+='<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] p-4">'+
-      '<div class="flex items-center gap-2 mb-3">'+MI('notifications','text-[19px] text-primary-container')+
-      '<h3 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">推送渠道</h3>'+
-      '<span class="px-2 py-0.5 rounded-full border text-label-uppercase font-label-uppercase ml-auto '+(pcOn?'text-tertiary bg-tertiary-container/15 border-tertiary-container/30':'text-outline bg-surface-container border-surface-container-highest')+'">'+(pcOn?'已启用':'未配置')+'</span></div>'+
-      '<div class="flex flex-col gap-1.5 text-body-sm font-body-sm">'+
-      '<div class="flex items-center justify-between"><span class="text-outline">通道</span><span class="font-mono-code-sm text-on-surface">'+(pc&&pc.channel?esc(pc.channel):'WxPusher')+'</span></div>'+
-      '<div class="flex items-center justify-between"><span class="text-outline">收件人</span><span class="font-mono-code-sm text-on-surface truncate max-w-[160px]">'+esc((pc&&(pc.uid||pc.topic||''))||'—')+'</span></div>'+
-      '</div>'+
-      '<button class="w-full mt-3 h-8 rounded-lg bg-surface-container border border-surface-container-highest text-on-surface-variant hover:text-on-surface text-body-sm font-body-sm flex items-center justify-center gap-1.5 transition-colors" data-click="Actions.pushDailyReport" data-pass-this="1">'+MI('send','text-[16px]')+'立即推送给我</button>'+
-      '<div class="text-body-sm font-body-sm text-outline mt-2">推送配置在【面板用户 → 通知设置】里维护。</div></div>';
     /* 系统 */
     const sc=d.sched||{};
     html+='<div class="bg-surface-container-low border border-surface-container-high rounded-[14px] p-4">'+
       '<div class="flex items-center gap-2 mb-3">'+MI('dns','text-[19px] text-primary-container')+
       '<h3 class="text-headline-md font-headline-md font-semibold text-on-surface tracking-tight">系统</h3></div>'+
       '<div class="flex flex-col gap-1.5 text-body-sm font-body-sm">'+
-      (d.disk?('<div class="flex items-center justify-between"><span class="text-outline">服务器磁盘</span><span class="font-mono-code-sm text-on-surface">'+d.disk.used+'G / '+d.disk.total+'G · '+d.disk.pct+'%'+(d.disk.pct>=90?' <span class="text-error">需清理</span>':'')+'</span></div>'):'')+
-      '<div class="flex items-center justify-between"><span class="text-outline">启用定时任务</span><span class="font-mono-code-sm text-on-surface">'+(sc.count||0)+' 个</span></div>'+
-      '<div class="flex items-start justify-between gap-3"><span class="text-outline shrink-0">告警 24h</span><span class="text-body-sm text-right '+((d.alerts&&d.alerts.length)?'text-error':'text-tertiary')+'">'+((d.alerts&&d.alerts.length)?esc(d.alerts.slice(0,3).join('；')):'无')+'</span></div>'+
-      '</div>'+
-      ((sc.lines&&sc.lines.length)?('<pre class="mt-3 pt-3 border-t border-surface-container-high/60 font-mono-code-sm text-mono-code-sm text-outline whitespace-pre-wrap leading-relaxed">'+sc.lines.map(esc).join('\n')+'</pre>'):'')+
-      '</div>';
+      (d.disk?('<div class="flex items-center justify-between"><span class="text-outline">磁盘</span><span class="font-mono-code-sm text-on-surface">'+d.disk.used+' / '+d.disk.total+'G · '+d.disk.pct+'%'+(d.disk.pct>=90?' <span class="text-error">需清理</span>':'')+'</span></div>'):'')+
+      '<div class="flex items-center justify-between"><span class="text-outline">定时任务</span><span class="font-mono-code-sm text-on-surface">'+(sc.count||0)+' 个</span></div>'+
+      '<div class="flex items-center justify-between"><span class="text-outline">日报推送</span><span class="'+((pcOn)?'text-tertiary':'text-outline')+'">'+(pcOn?('已启用'+(pc&&pc.channel?(' · '+esc(pc.channel)):'')):'未配置')+'</span></div>'+
+      /* [v18] 告警 24h 原来把前 3 条原始文案整段铺开（"火花心跳抓取异常（无时间戳）· 任务重失败…"），
+         手机上一行被撑成三四行乱码状，而且「今日提醒」卡里已经用可读的方式列过同一批问题。
+         这里只留第一条 + 条数，单行截断，要看细节去提醒卡/台账。 */
+      '<div class="flex items-center justify-between gap-3"><span class="text-outline shrink-0">告警 24h</span><span class="drAlertOne '+((d.alerts&&d.alerts.length)?'text-error':'text-tertiary')+'">'+((d.alerts&&d.alerts.length)?(esc(d.alerts[0])+(d.alerts.length>1?(' 等 '+d.alerts.length+' 条'):'')):'无')+'</span></div>'+
+      '</div></div>';
     html+='</div>'; /* /右列 */
     html+='</section>';
 
     body.innerHTML=html;
+    /* [v18] 底部统计只留「几个号 · 哪一天 · 口径」，删掉「登录态 43ms」（那是调试数字）。
+       「生成/存档/快照时间」挪到 #drGen，与统计同行显示。 */
+    const g2=document.getElementById('drGen');
+    /* 生成时间只留 HH:MM：日期紧跟其后的统计行里已经有了，「11-15 13:28 · 2026-11-15」是同一句话说两遍。 */
+    const _hm=s=>{const m=String(s||'').match(/(\d{1,2}:\d{2})/);return m?m[1]:String(s||'');};
+    if(g2)g2.textContent=(d.archived?((d.from_archive?'归档 ':'存档 ')+esc((d.snapshot_at||d.date||'').slice(5,16)))
+      :('生成 '+_hm(d.generated)))+' · ';
     const st=document.getElementById('drStat');
-    if(st)st.textContent='共 '+_accsAll.length+' 个抖音号 · '+(d.date||'')+(d.from_archive?'（归档包）':(d.archived?'（存档）':'（含昨日）'));
+    if(st)st.textContent='共 '+_accsAll.length+' 个号 · '+(d.date||'')+(d.from_archive?'（归档）':(d.archived?'（存档）':'（含昨日）'));
     if(sess==='1'&&!d.archived)drFillSessions(false);   // 存档里已带登录态，不必再校验
   }catch(e){if(e.message!=='unauthorized')body.innerHTML='<div class="py-12 text-center text-body-sm text-outline">加载失败：'+esc(e.message)+'</div>';}
 };
@@ -5096,7 +4903,6 @@ async function drLoadDates(){
 }
 /* 登录态单独异步校验：curl 抖音较慢，不能挡着日报首屏 */
 async function drFillSessions(force){
-  const t0=Date.now();
   const nodes=()=>document.querySelectorAll('[id^="drSess_"]');
   nodes().forEach(el=>{el.innerHTML='<span class="tiny muted">校验中…</span>';});
   try{
@@ -5113,8 +4919,7 @@ async function drFillSessions(force){
         if(bg)bg.innerHTML='<span class="badge b-no">❌ 登录失效</span>';
       }
     });
-    const ms=Date.now()-t0, st=document.getElementById('drStat');
-    if(st)st.textContent+=' · 登录态 '+(ms<1000?(ms+'ms'):(ms/1000).toFixed(1)+'s');
+    /* [v18] 原先这里会往统计行尾追加「· 登录态 43ms」——调试数字，对用户无意义，已删。 */
   }catch(e){
     nodes().forEach(el=>{el.innerHTML='<span class="tiny muted">校验失败</span>';});
   }
@@ -5226,7 +5031,7 @@ Object.assign(Actions,{
     const name=(document.getElementById('addAccName').value||'').trim();
     if(!uid){toast('请输入抖音号 unique_id','','err');return;}
     try{const r=await api('/api/accounts',{method:'POST',body:{unique_id:uid,username:name}});
-      if(r.ok){toast('已添加账号',r.unique_id+'（cookie 待导入/扫码）','ok');}
+      if(r.ok){toast('已添加账号',r.unique_id+'（cookie 待导入/扫码）','ok');Actions.closeAddAcc();}
       else toast('添加失败',r.error||'','err');
     }catch(e){toast('添加失败',e.message,'err');}
     Loaders.accounts();
@@ -5577,7 +5382,7 @@ function _pushBody(){
 function _sw_show(){App.state.scrapedHidden=false;Loaders.friends();}
 function _sw_hide(){App.state.scrapedHidden=true;Loaders.friends();}
 // [新增20261001] 展开/收起「非互关·从未聊过」的空会话（默认隐藏）
-function _sw_nm(){App.state.showNonMutual=!App.state.showNonMutual;Loaders.friends();}
+function _sw_nm(){App.state.showNonMutual=!App.state.showNonMutual;Loaders.friends();_frAddRender();}
 /* [v4] 登录页密码可见性切换：CSP 是 script-src 'self'（无 unsafe-inline），
    原来写的 onclick= 内联处理器会被直接拦掉 → 改用 data-click 委托到全局函数。 */
 function _togglePwd(){var e=document.getElementById('loginPass');if(!e)return;e.type=(e.type==='password'?'text':'password');}
@@ -5682,13 +5487,20 @@ Actions.verifyAccount=async function(uid){
   }catch(e){toast('校验失败',e.message,'err');}
 };
 
-/* [v4 新增] 跳到「新增账号」录入条 */
-Actions.gotoAddAcc=function(){
-  const el=document.getElementById('addAccBox');
-  if(el&&el.scrollIntoView)el.scrollIntoView({behavior:'smooth',block:'center'});
-  const inp=document.getElementById('addAccUid');
-  if(inp)setTimeout(()=>{try{inp.focus();}catch(e){}},300);
+/* [v21] 「新增账号」改用弹窗：#accAddModal（抖音账号页卡头「添加」打开） */
+Actions.openAddAcc=function(){
+  const m=document.getElementById('accAddModal');
+  if(!m)return;
+  m.style.display='flex';
+  setTimeout(function(){const i=document.getElementById('addAccUid');if(i){try{i.focus();}catch(e){}}},60);
 };
+Actions.closeAddAcc=function(){
+  const m=document.getElementById('accAddModal');if(m)m.style.display='none';
+  const u=document.getElementById('addAccUid'),n=document.getElementById('addAccName');
+  if(u)u.value='';if(n)n.value='';
+};
+/* 旧入口保留（内部改调弹窗），避免别处 data-click 引用失效 */
+Actions.gotoAddAcc=function(){Actions.openAddAcc();};
 
 /* [v4 新增] 打开 noVNC 远程桌面（6080） */
 Actions.openNoVnc=function(){
@@ -5697,10 +5509,9 @@ Actions.openNoVnc=function(){
   if(!w)toast('无法打开新窗口','请手动访问 '+url,'warn');
 };
 
-/* [v4 新增] 跳到「添加用户」录入条 */
+/* [v18.7] 「添加用户」录入条改为弹窗：旧入口直接打开弹窗并聚焦用户名 */
 Actions.gotoAddUser=function(){
-  const el=document.getElementById('addUserBox');
-  if(el&&el.scrollIntoView)el.scrollIntoView({behavior:'smooth',block:'center'});
+  Actions.puAddOpen();
   const inp=document.getElementById('puName');
   if(inp)setTimeout(()=>{try{inp.focus();}catch(e){}},300);
 };
@@ -5856,11 +5667,6 @@ const Sheet={
       let acts='<button type="button" data-click="Actions.openAvatarPicker" data-args="pu|'+esc(r.username)+'">更换头像</button>'+
         '<button type="button" data-click="Actions.pushEditUser" data-arg="'+esc(r.username)+'">通知设置</button>'+
         '<button type="button" data-click="Actions.panelUserPwd" data-arg="'+esc(r.username)+'">重置密码</button>';
-      /* [v16.2] 微信绑定：只有管理员能生成绑定码 / 解绑（后端是 require_admin） */
-      if(App.state.isAdmin){
-        acts+='<button type="button" data-click="Actions.wxBindCode" data-arg="'+esc(r.username)+'">生成绑定码</button>';
-        if(r.wxBound)acts+='<button type="button" data-click="Actions.wxUnbind" data-args="'+esc(r.username)+'|'+r.wxBound+'">解绑微信</button>';
-      }
       if(r.canDel)acts+='<button type="button" data-click="Actions.panelUserDel" data-arg="'+esc(r.username)+'">删除用户</button>';
       return {
         title:r.username+(r.mine?'（我）':''),
@@ -5868,8 +5674,7 @@ const Sheet={
         kvs:[['用户名',esc(r.username)],['角色权限',r.role||'—'],['关联抖音号',esc(r.uids||'—')],
              ['推送通道',esc(r.channel||'—')],['推送状态',r.on?'已启用':'未启用'],
              ['每日早报',r.daily?'每天 09:00 开启':'已关闭'],
-             ['微信绑定',esc(r.wxTxt||'未绑定微信')],
-             ['微信标识',esc(r.wxMasks||'—')],['账号标识',esc(r.kindId||'—')]],
+             ['账号标识',esc(r.kindId||'—')]],
         acts:acts
       };
     }
@@ -5946,7 +5751,7 @@ Object.assign(Actions,_V12A);
 /* [v4 fix 20261011] data-* 委托经 resolveFn 只从 window 解析 → IIFE 内的裸 _xxx
    处理器必须逐个导出，否则点击/输入全部落入 "Handler not found"。 */
 (function(){
-  var names=['_fvPage','_fvSearch','_fvSize','_fvSort','_tfToggle','_sparkUi','_logAuto','_logExport','_logTab',
+  var names=['_fvPage','_fvSearch','_fvSize','_fvSort','_sparkUi','_logAuto','_logTab',
     '_puPage','_puRole','_puSearch','_recType','_recDate','_recScope',
     '_recCalToggle','_recCalNav','_recCalPick',
     '_sw_hide','_sw_nm','_sw_show','_ct_nm','_taskChipFilter','_taskInsertEmoji','_taskMsgCount',

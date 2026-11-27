@@ -12,7 +12,7 @@
 <link rel="apple-touch-icon" href="/static/icon-192.png">
 <title>火花守护 · SPARK CONSOLE</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23ff7a45' d='M12 2c1 3-2 4.5-2 7.5C10 12 12 13 12 13s3.5-1.8 3.5-5c2 1.8 3.2 4 3.2 6.5A6.7 6.7 0 0 1 12 21a6.7 6.7 0 0 1-6.7-6.5C5.3 9.5 8.5 6 12 2z'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/static/style4.css?v=5.35">
+<link rel="stylesheet" href="/static/style4.css?v=5.56">
 <style>
   /* 登录页背景按 Stitch 09 稿：纯画布 + 网格 + 径向光晕 */
   #login{background:#0e131d}
@@ -152,8 +152,7 @@
         </div>
         <span class="material-symbols-outlined text-outline text-[16px] shrink-0" aria-hidden="true">verified_user</span>
       </div>
-      <div class="px-1 text-[10px] font-mono text-outline/60 flex items-center justify-between">
-        <span>管理员: sys_admin (在线)</span>
+      <div class="px-1 text-[10px] font-mono text-outline/60 flex items-center justify-end">
         <button class="flex items-center gap-1 text-outline/60 hover:text-error transition-colors" data-click="App.logout" title="退出登录"><span class="material-symbols-outlined text-[13px]">logout</span>退出</button>
       </div>
     </div>
@@ -165,7 +164,10 @@
     <!-- 顶栏：由 app_v4.js 的 HDR(view) 逐页渲染（Stitch 各稿 <header> 原文转写） -->
     <header id="topbar" class="sticky top-0 z-20 h-16 bg-surface/80 backdrop-blur-md border-b border-outline-variant/30 flex items-center justify-between gap-3 px-gutter-lg"></header>
 
-    <div class="p-gutter-lg flex-1 flex flex-col gap-6" id="content"></div>
+    <div class="p-gutter-lg flex-1 flex flex-col gap-6" id="content">
+      <!-- [v20] 正文顶部工具条：原顶栏按钮全部挪到这里，内容由 app_v4.js 的 TOOLBAR(view) 渲染 -->
+      <div id="pageTools" class="shrink-0"></div>
+    </div>
 
     <!-- 底部引擎状态条（Stitch 稿） -->
     <footer class="h-8 px-gutter-lg border-t border-outline-variant/30 flex items-center justify-between text-[10px] font-mono text-outline shrink-0">
@@ -194,6 +196,25 @@
 
 <!-- ======================= 弹窗（id 契约与 v3 一致） ======================= -->
 
+<!-- 面板用户：推送通道设置（点表头「推送通道」打开，正文由 Loaders.panelusers 填入） -->
+<div id="puPushModal" style="display:none;position:fixed;inset:0;background:rgba(14,19,29,.72);z-index:98;align-items:center;justify-content:center;padding:12px">
+  <div class="card" style="width:min(520px,calc(94vw / var(--ui-scale)));max-height:calc(88vh / var(--ui-scale));overflow:auto">
+    <h4><svg class="svgic" viewBox="0 0 24 24" style="width:17px;height:17px"><path d="M22 2 11 13"/><path d="M22 2l-7 20-4-9-9-4z"/></svg>推送通道设置</h4>
+    <div id="puPushBody" style="display:flex;flex-direction:column;gap:14px;margin-top:12px"></div>
+    <div class="toolbar" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost btn-sm" data-click="Actions.puPushClose">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 面板用户：添加用户（列表卡右上角「添加」打开，正文由 Loaders.panelusers 填入） -->
+<div id="puAddModal" style="display:none;position:fixed;inset:0;background:rgba(14,19,29,.72);z-index:98;align-items:center;justify-content:center;padding:12px">
+  <div class="card" style="width:min(440px,calc(92vw / var(--ui-scale)))">
+    <h4><svg class="svgic" viewBox="0 0 24 24" style="width:17px;height:17px"><path d="M12 5v14M5 12h14"/></svg>添加面板用户</h4>
+    <div id="puAddBody" style="display:flex;flex-direction:column;gap:10px;margin-top:12px"></div>
+  </div>
+</div>
+
 <!-- 修改备注 -->
 <div id="remarkModal" style="display:none;position:fixed;inset:0;background:rgba(14,19,29,.72);z-index:98;align-items:center;justify-content:center">
   <div class="card" style="width:min(420px,calc(92vw / var(--ui-scale)))">
@@ -203,6 +224,48 @@
     <div class="toolbar" style="justify-content:flex-end;margin-top:16px">
       <button class="btn btn-ghost btn-sm" data-click="Actions.closeRemark">取消</button>
       <button class="btn btn-primary btn-sm" data-click="Actions.saveRemark">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 任务与日志：新增定时任务（顶栏「添加」打开，正文由 Actions.openTaskForm 填入） -->
+<div id="tfModal" style="display:none;position:fixed;inset:0;background:rgba(14,19,29,.72);z-index:98;align-items:center;justify-content:center;padding:12px">
+  <div class="card" style="width:min(680px,calc(92vw / var(--ui-scale)));max-height:calc(90vh / var(--ui-scale));overflow:auto">
+    <h4><svg class="svgic" viewBox="0 0 24 24" style="width:17px;height:17px"><path d="M12 5v14M5 12h14"/></svg>新增定时任务</h4>
+    <div id="tfBody" style="margin-top:12px"></div>
+    <div class="toolbar" style="justify-content:flex-end;margin-top:14px">
+      <button class="btn btn-ghost btn-sm" data-click="Actions.closeTaskForm">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 好友与火花：添加好友（正文顶部工具条「添加好友」打开，正文由 _frAddBodyHtml 填入） -->
+<div id="frAddModal" style="display:none;position:fixed;inset:0;background:rgba(14,19,29,.72);z-index:98;align-items:center;justify-content:center;padding:12px">
+  <div class="card" style="width:min(860px,calc(94vw / var(--ui-scale)));max-height:calc(90vh / var(--ui-scale));overflow:auto">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <h4 style="margin:0"><svg class="svgic" viewBox="0 0 24 24" style="width:17px;height:17px"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>添加好友</h4>
+      <button type="button" class="hm-ctrl" title="关闭" data-click="Actions.closeFriendAdd"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <!-- 抖音号添加 + 抓取好友列表 + 抓取到的联系人表格，全部由 app_v4.js 生成 -->
+    <div id="frAddBody" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- 抖音账号：新增账号（「已绑定的抖音账号」卡头「添加」打开） -->
+<div id="accAddModal" style="display:none;position:fixed;inset:0;background:rgba(14,19,29,.72);z-index:98;align-items:center;justify-content:center;padding:12px">
+  <div class="card" style="width:min(460px,calc(92vw / var(--ui-scale)))">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+      <h4 style="margin:0"><svg class="svgic" viewBox="0 0 24 24" style="width:17px;height:17px"><path d="M12 5v14M5 12h14"/></svg>新增抖音账号</h4>
+      <button type="button" class="hm-ctrl" title="关闭" data-click="Actions.closeAddAcc"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></button>
+    </div>
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px">
+      <input id="addAccUid" class="dark-input" placeholder="新账号抖音号 unique_id" autocomplete="off">
+      <input id="addAccName" class="dark-input" placeholder="备注名（可选）" autocomplete="off">
+      <div class="tiny muted" style="line-height:1.6">多账号时按 TASKS 逐个执行；写操作前自动备份 .env。添加后需导入 cookie 或扫码登录才能参与续火花。</div>
+      <div class="toolbar" style="justify-content:flex-end;margin-top:0">
+        <button class="btn btn-ghost btn-sm" data-click="Actions.closeAddAcc">取消</button>
+        <button class="btn btn-primary btn-sm" data-click="Actions.addAccount">添加账号</button>
+      </div>
     </div>
   </div>
 </div>
@@ -375,6 +438,6 @@
   </div>
 </div>
 
-<script src="/static/app_v4.js?v=17.0"></script>
+<script src="/static/app_v4.js?v=21.2"></script>
 </body>
 </html>
